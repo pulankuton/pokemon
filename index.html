@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="description" content="ポケモンチャンピオンズのタイプ相性を分析し、最適なパーティ構成を提案するツール">
+  <title>ポケモンチャンピオンズ タイプ相性補完ビルダー</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ローディングオーバーレイ -->
+  <div id="loading-overlay" class="loading-overlay" style="display:none;">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loading-text">ポケモンデータを読み込み中...</div>
+    <div class="loading-progress">
+      <div class="loading-progress-fill" id="loading-progress-fill"></div>
+    </div>
+  </div>
+
+  <!-- ヘッダー -->
+  <!-- パスワード認証画面 -->
+  <div id="auth-container" class="auth-overlay">
+    <div class="auth-card">
+      <h2 style="margin-bottom: 8px;">🔐 自分専用ツール</h2>
+      <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom: 24px;">続行するには合言葉を入力してください</p>
+      <input type="password" id="auth-input" class="search-input" placeholder="合言葉" style="margin-bottom: 16px;">
+      <button id="auth-submit" class="mode-btn active" style="width: 100%;">ロック解除</button>
+      <p id="auth-error" style="color: var(--danger); font-size: 0.8rem; margin-top: 12px; display: none;">合言葉が違います</p>
+    </div>
+  </div>
+
+  <div id="app-container" style="display: none;">
+    <header class="header">
+    <div class="header-inner" style="position:relative;">
+      <h1>⚔️ タイプ相性補完ビルダー</h1>
+      <p>Pokémon Champions — 最適なパーティ構成を見つけよう</p>
+      <div style="position:absolute; right:20px; top:50%; transform:translateY(-50%);">
+        <a href="battle.html" class="mode-btn" style="text-decoration:none; padding:8px 16px;">⚔️ 選出サポートツールへ ➡️</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="container">
+
+    <!-- Step 1: ポケモン選択 -->
+    <section>
+      <div class="section-title">
+        <span class="step-badge">1</span>
+        <span>起点となるポケモンを選ぶ（1〜5枠）</span>
+      </div>
+      <div class="selection-area" id="selection-area" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+        <!-- スロット1 -->
+        <div class="selection-slot" id="slot-1">
+          <div class="slot-label">1枠目</div>
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="search-1" placeholder="ポケモン名を入力..." autocomplete="off">
+            <div class="search-dropdown" id="dropdown-1"></div>
+          </div>
+          <div id="selected-1"></div>
+        </div>
+        <!-- スロット2 -->
+        <div class="selection-slot" id="slot-2">
+          <div class="slot-label">2枠目</div>
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="search-2" placeholder="ポケモン名を入力..." autocomplete="off">
+            <div class="search-dropdown" id="dropdown-2"></div>
+          </div>
+          <div id="selected-2"></div>
+        </div>
+        <!-- スロット3 -->
+        <div class="selection-slot" id="slot-3">
+          <div class="slot-label">3枠目</div>
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="search-3" placeholder="ポケモン名を入力..." autocomplete="off">
+            <div class="search-dropdown" id="dropdown-3"></div>
+          </div>
+          <div id="selected-3"></div>
+        </div>
+        <!-- スロット4 -->
+        <div class="selection-slot" id="slot-4">
+          <div class="slot-label">4枠目</div>
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="search-4" placeholder="ポケモン名を入力..." autocomplete="off">
+            <div class="search-dropdown" id="dropdown-4"></div>
+          </div>
+          <div id="selected-4"></div>
+        </div>
+        <!-- スロット5 -->
+        <div class="selection-slot" id="slot-5">
+          <div class="slot-label">5枠目</div>
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="search-5" placeholder="ポケモン名を入力..." autocomplete="off">
+            <div class="search-dropdown" id="dropdown-5"></div>
+          </div>
+          <div id="selected-5"></div>
+        </div>
+        <!-- スロット6 -->
+        <div class="selection-slot" id="slot-6">
+          <div class="slot-label">6枠目</div>
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="search-6" placeholder="ポケモン名を入力..." autocomplete="off">
+            <div class="search-dropdown" id="dropdown-6"></div>
+          </div>
+          <div id="selected-6"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 評価モード & フィルター -->
+    <section>
+      <div class="section-title">
+        <span class="step-badge">⚙</span>
+        <span>評価モード・フィルター設定</span>
+      </div>
+      
+      <div class="settings-panel">
+        <div class="mode-selector" id="mode-selector">
+          <button class="mode-btn" data-mode="defense">🛡️ 防御重視</button>
+          <button class="mode-btn active" data-mode="balanced">⚖️ バランス</button>
+          <button class="mode-btn" data-mode="offense">⚔️ 攻撃重視</button>
+        </div>
+        
+        <div class="filters-container">
+          <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px;">
+            <label class="filter-label">
+              <input type="checkbox" id="filter-bst" class="filter-checkbox">
+              <span>種族値(BST) 500以上のみ</span>
+            </label>
+            <label class="filter-label">
+              <input type="checkbox" id="filter-overlap" class="filter-checkbox">
+              <span>パーティ内でのタイプ被りなし</span>
+            </label>
+            <label class="filter-label">
+              <span>メガシンカ枠:</span>
+              <select id="filter-mega" class="filter-select">
+                <option value="6">制限なし</option>
+                <option value="0">0枠 (なし)</option>
+                <option value="1">1枠まで</option>
+                <option value="2">2枠まで</option>
+              </select>
+            </label>
+          </div>
+          <div style="display: flex; gap: 16px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--border-glass);">
+            <label class="filter-label" style="color: var(--accent-secondary);">
+              <span style="font-weight: 500;">🛡️ 最終パーティの残り弱点ペナルティ:</span>
+              <select id="filter-weakness" class="filter-select">
+                <option value="none">制限なし</option>
+                <option value="0">0pt (ペナルティなし)</option>
+                <option value="-1">-1pt まで許容</option>
+                <option value="-2">-2pt まで許容</option>
+                <option value="-3">-3pt まで許容</option>
+              </select>
+            </label>
+            <label class="filter-label" style="color: var(--accent-secondary);">
+              <span style="font-weight: 500;">⚔️ 抜群が取れないタイプ数:</span>
+              <select id="filter-uncovered" class="filter-select">
+                <option value="none">制限なし</option>
+                <option value="0">0個 (全タイプ抜群)</option>
+                <option value="1">1つ以下</option>
+                <option value="2">2つ以下</option>
+                <option value="3">3つ以下</option>
+              </select>
+            </label>
+          </div>
+          <div style="display: flex; gap: 16px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--border-glass);">
+            <label class="filter-label" style="color: var(--danger);">
+              <span style="font-weight: 500;">⚔️ 攻撃面の重たい相手:</span>
+              <select id="filter-atk-threats" class="filter-select">
+                <option value="none">制限なし</option>
+                <option value="0">0匹（完璧）</option>
+                <option value="5">5匹以下</option>
+                <option value="10">10匹以下</option>
+                <option value="20">20匹以下</option>
+                <option value="30">30匹以下</option>
+              </select>
+            </label>
+            <label class="filter-label" style="color: var(--accent-primary);">
+              <span style="font-weight: 500;">🛡️ 防御面の重たい相手:</span>
+              <select id="filter-def-threats" class="filter-select">
+                <option value="none">制限なし</option>
+                <option value="0">0匹（完璧）</option>
+                <option value="5">5匹以下</option>
+                <option value="10">10匹以下</option>
+                <option value="20">20匹以下</option>
+                <option value="30">30匹以下</option>
+              </select>
+            </label>
+          </div>
+
+          <div style="padding-top: 12px; border-top: 1px solid var(--border-glass); margin-top: 8px;">
+            <div style="font-weight: 500; font-size: 0.9rem; color: var(--accent-secondary); margin-bottom: 8px;">📈 役割・ステータス最低要件（複数追加可）:</div>
+            <div id="stat-req-list" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;"></div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <select id="stat-req-type-sel" class="filter-select">
+                <option value="hp">HP (H)</option>
+                <option value="attack">攻撃 (A)</option>
+                <option value="defense">防御 (B)</option>
+                <option value="special-attack">特攻 (C)</option>
+                <option value="special-defense">特防 (D)</option>
+                <option value="speed">素早さ (S)</option>
+              </select>
+              <input type="number" id="stat-req-val-inp" class="search-input" value="100" min="1" max="255" style="width:70px; padding:4px 8px; font-size:0.9rem; border-radius:4px;">
+              <span style="color:var(--text-secondary); font-size:0.85rem;">以上を含む</span>
+              <button id="btn-add-stat-req" class="mode-btn" style="padding:4px 16px; font-size:0.8rem;">追加</button>
+            </div>
+          </div>
+          
+          <div style="padding-top: 12px; border-top: 1px solid var(--border-glass); margin-top: 8px;">
+            <div style="font-weight: 500; font-size: 0.9rem; color: var(--accent-secondary); margin-bottom: 8px;">🧩 必ず含めるタイプ（複数選択可）:</div>
+            <div id="filter-required-types-container" class="type-toggle-grid">
+              <!-- JSで生成 -->
+            </div>
+          </div>
+        </div>
+        
+        <!-- 除外されたポケモンのリスト表示領域 -->
+        <div id="excluded-container" style="display:none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-glass);">
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px;">🚫 除外中のポケモン (クリックで解除)</div>
+          <div id="excluded-list" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+        </div>
+        
+      </div>
+    </section>
+
+    <!-- 相性分析 -->
+    <section id="analysis-section" style="display:none;">
+      <div class="section-title">
+        <span class="step-badge">📊</span>
+        <span>現在のタイプ相性分析</span>
+      </div>
+      <div class="analysis-panel">
+        <div class="analysis-grid">
+          <!-- 防御分析 -->
+          <div class="analysis-section">
+            <h3><span class="icon">🛡️</span> 防御面 — カバー不足の弱点</h3>
+            <p class="description">パーティ合計ポイントがマイナスのタイプ</p>
+            <div class="type-list" id="weakness-list"></div>
+          </div>
+          <!-- 攻撃分析 -->
+          <div class="analysis-section">
+            <h3><span class="icon">⚔️</span> 攻撃面 — 抜群が取れないタイプ</h3>
+            <p class="description">全メンバーのタイプ一致攻撃が等倍以下</p>
+            <div class="type-list" id="uncovered-list"></div>
+          </div>
+        </div>
+        <!-- ヒートマップ -->
+        <div class="heatmap-container">
+          <div class="heatmap-title">🗺️ 現在の防御相性ヒートマップ（被ダメージ倍率）</div>
+          <div style="display:flex; gap:3px; margin-bottom:4px;" id="heatmap-labels"></div>
+          <div id="heatmap-defense"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 2: 候補パーティの提示 -->
+    <section id="recommendations-section" style="display:none;">
+      <div class="section-title">
+        <span class="step-badge">2</span>
+        <span>おすすめのパーティ構成（5パターン）</span>
+      </div>
+      
+      <!-- 動的生成される候補領域 -->
+      <div id="patterns-container"></div>
+      
+    </section>
+
+    <!-- Step 3: ベストペア分析 -->
+    <section id="bestpair-section">
+      <div class="section-title">
+        <span class="step-badge">🔍</span>
+        <span>ベストペア分析</span>
+      </div>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">使いたいポケモンを候補プールに追加し、その中から最も重たい相手が少なくなる2匹の組み合わせ（コア）を自動で探します。</p>
+      
+      <div style="position:relative; margin-bottom:12px;">
+        <input type="text" id="pool-search" class="search-input" placeholder="🔍 候補に追加するポケモンを検索..." autocomplete="off" style="width:100%;">
+        <div id="pool-dropdown" class="dropdown"></div>
+      </div>
+      
+      <div id="pool-members" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; min-height:40px; padding:12px; background:rgba(255,255,255,0.03); border-radius:8px; border:1px dashed var(--border-glass);"></div>
+      
+      <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px;">
+        <label class="filter-label">
+          <input type="checkbox" id="pool-no-overlap" class="filter-checkbox">
+          <span>パーティ全体のタイプ被りなし</span>
+        </label>
+      </div>
+
+      <div id="pool-excluded-container" style="display:none; margin-bottom:12px; padding:10px; background:rgba(0,0,0,0.1); border-radius:8px;">
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">🚫 除外中（クリックで解除）</div>
+        <div id="pool-excluded-list" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+      </div>
+
+      <button id="btn-analyze-pairs" class="mode-btn" style="padding:8px 24px; font-size:0.9rem; background:var(--accent-primary); color:white; border:none; border-radius:8px; cursor:pointer;">⚡ ベストチームを探す</button>
+      <button id="btn-clear-pool" class="mode-btn" style="padding:8px 16px; font-size:0.85rem; margin-left:8px; cursor:pointer;">🗑️ プールをクリア</button>
+      
+      <div id="pair-results" style="margin-top:20px;"></div>
+    </section>
+
+  </main>
+  </div> <!-- /app-container -->
+
+  <!-- Scripts -->
+  <script src="typeChart.js?v=6"></script>
+  <script src="pokemonData.js?v=6"></script>
+  <script src="teamAnalyzer.js?v=6"></script>
+  <script src="app.js?v=6"></script>
+</body>
+</html>

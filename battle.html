@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>選出サポート | チャンピオンズ</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+  <div id="auth-container" class="auth-wrapper">
+    <div class="auth-card">
+      <div class="auth-title">CHAMPIONS BATTLE</div>
+      <p style="color:var(--text-muted);font-size:0.9rem;margin-bottom:20px;text-align:center;">合言葉を入力してください</p>
+      <input type="password" id="auth-input" class="auth-input" placeholder="Password">
+      <button id="auth-submit" class="auth-btn">認証</button>
+      <div id="auth-error" class="auth-error">パスワードが違います</div>
+    </div>
+  </div>
+
+  <div id="app-container" style="display:none;">
+    
+    <div id="loading-overlay" class="loading-overlay hidden">
+      <div class="spinner"></div>
+      <div id="loading-text" class="loading-text">ポケモンデータをロード中...</div>
+      <div class="loading-progress-bar"><div id="loading-progress-fill" class="loading-progress-fill"></div></div>
+    </div>
+
+    <!-- Header Navigation -->
+    <header style="display:flex; justify-content:space-between; align-items:center; padding: 20px 40px; background:var(--bg-glass); border-bottom:1px solid var(--border-glass);">
+      <h1 class="title" style="margin-bottom:0;">⚔️ 選出サポートツール</h1>
+      <a href="index.html" class="mode-btn" style="text-decoration:none; padding:8px 16px;">⬅️ 構築ビルダーに戻る</a>
+    </header>
+
+    <main class="container">
+      
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 30px;">
+        
+        <!-- My Team -->
+        <div class="glass-panel" style="padding: 24px; border-color: rgba(9, 132, 227, 0.4);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+            <h2 class="section-title" style="color: #74b9ff; margin:0;">🔵 自分のパーティ</h2>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="select-saved-team" style="padding:4px 8px; font-size:0.8rem; background:var(--bg-glass); color:inherit; border:1px solid var(--border-glass); border-radius:4px; outline:none; cursor:pointer;">
+                <option value="">📂 読み込み...</option>
+              </select>
+              <button id="btn-save-my-team" class="mode-btn" style="padding:4px 12px; font-size:0.8rem;">💾 保存</button>
+              <button id="btn-share-team" class="mode-btn" style="padding:4px 12px; font-size:0.8rem; background:rgba(108, 92, 231, 0.2); border-color:rgba(108, 92, 231, 0.5);">📱 共有URL</button>
+            </div>
+          </div>
+          <div id="my-team-container" style="display:flex; flex-direction:column; gap:16px;">
+            <!-- Generated via JS -->
+          </div>
+        </div>
+
+        <!-- Opponent Team -->
+        <div class="glass-panel" style="padding: 24px; border-color: rgba(225, 112, 85, 0.4);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+            <h2 class="section-title" style="color: #e17055; margin:0;">🔴 相手のパーティ</h2>
+            <button id="btn-clear-opp-team" class="mode-btn" style="padding:4px 12px; font-size:0.8rem;">クリア</button>
+          </div>
+          <div id="opp-team-container" style="display:flex; flex-direction:column; gap:16px;">
+            <!-- Generated via JS -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Analysis Results -->
+      <div id="battle-analysis-section" style="display:none; margin-top:30px;">
+        
+        <!-- 6x6 Matrix -->
+        <div class="glass-panel" style="padding: 24px; margin-bottom: 30px;">
+          <h2 class="section-title">📊 相性マトリクス (自分 vs 相手)</h2>
+          <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">
+            ※青色は自分有利（抜群技を持ってる / 相手から抜群を取られない）<br>
+            ※赤色は自分不利（有効打がない / 相手から抜群を取られる）
+          </p>
+          <div id="matrix-container" style="overflow-x:auto;"></div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 30px;">
+          
+          <!-- MVP Ranking -->
+          <div class="glass-panel" style="padding: 24px;">
+            <h2 class="section-title">🏆 刺さり具合ランキング</h2>
+            <div id="ranking-container" style="display:flex; flex-direction:column; gap:12px;"></div>
+          </div>
+
+          <!-- Best Selection (Top 3) -->
+          <div class="glass-panel" style="padding: 24px;">
+            <h2 class="section-title">✨ 推奨選出パターン (シングル3匹)</h2>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:16px;">
+              ランキング上位を軸に、相手への対応幅が広い3匹の組み合わせを提案します。
+            </p>
+            <div id="best-selection-container" style="display:flex; flex-direction:column; gap:20px;"></div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </main>
+
+  </div>
+
+  <script src="pokemonData.js"></script>
+  <script src="typeChart.js"></script>
+  <script src="teamAnalyzer.js"></script>
+  <script src="battle.js"></script>
+</body>
+</html>
