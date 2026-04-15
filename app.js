@@ -1102,7 +1102,7 @@
 
         // 脅威合計の少ない順にソート
         results.sort((a, b) => a.tc.total - b.tc.total);
-        const top = results.slice(0, 10);
+        const top = results.slice(0, 30);
 
         if (top.length === 0) {
           resultsDiv.innerHTML = `<div style="text-align:center; padding:20px; color:var(--danger);">❌ 条件を満たすパーティが見つかりませんでした。フィルター設定を緩めてみてください。</div>`;
@@ -1110,7 +1110,7 @@
         }
 
         resultsDiv.innerHTML = `
-          <h4 style="font-size:0.9rem; margin-bottom:12px; color:var(--text-secondary);">🏆 ベストチーム構成（${activeCandidates.length}匹から${totalActivePairs}通り検証 → ${results.length}件該当 → 上位10件）</h4>
+          <h4 style="font-size:0.9rem; margin-bottom:12px; color:var(--text-secondary);">🏆 ベストチーム構成（${activeCandidates.length}匹から${totalActivePairs}通り検証 → ${results.length}件該当 → 上位30件）</h4>
           <div style="display:flex; flex-direction:column; gap:16px;">
             ${top.map((r, rank) => {
               const medal = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `${rank+1}`;
