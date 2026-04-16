@@ -16,20 +16,45 @@
   
   // Filters
   let filterMinBst = false;
-  let filterOverlap = false;
+  let filterOverlap = true;
   let filterMaxMega = 6;
-  let filterMaxWeakness = 'none';
-  let filterMaxUncovered = 'none';
+  let filterMaxWeakness = '0';
+  let filterMaxUncovered = '0';
   let filterStatRequirements = []; // Array of { type, val }
   let filterRequiredTypes = new Set();
-  let filterMaxAtkThreats = 'none';
-  let filterMaxDefThreats = 'none';
+  let filterMaxAtkThreats = '5';
+  let filterMaxDefThreats = '5';
+
+  // 精度重視: 全探索で候補を取りこぼさない設定
+  const SEARCH_PROFILE = {
+    patternPoolLimit: null // null の場合は上限なし
+  };
   
   // Excluded List (Blacklist)
   let excludedPokemon = new Set();
 
   // Recent Pokemon (History)
   let recentPokemonIds = [];
+
+  const EXCLUDED_POKEMON_STORAGE_KEY = 'pokemon_builder_excluded';
+
+  function loadExcludedPokemon() {
+    const raw = localStorage.getItem(EXCLUDED_POKEMON_STORAGE_KEY);
+    if (!raw) return new Set();
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return new Set(parsed.filter(id => typeof id === 'string' && id.length > 0));
+      }
+    } catch (e) {
+      console.warn('[App] failed to parse excluded pokemon:', e);
+    }
+    return new Set();
+  }
+
+  function saveExcludedPokemon() {
+    localStorage.setItem(EXCLUDED_POKEMON_STORAGE_KEY, JSON.stringify(Array.from(excludedPokemon)));
+  }
 
   // ===== DOM References =====
   const loadingOverlay = document.getElementById('loading-overlay');
@@ -45,6 +70,86 @@
   const authInput = document.getElementById('auth-input');
   const authSubmit = document.getElementById('auth-submit');
   const authError = document.getElementById('auth-error');
+  const runAnalysisBtn = document.getElementById('btn-run-analysis');
+  const runCloudPerfectBtn = document.getElementById('btn-run-cloud-perfect-search');
+  const runAnalysisHint = document.getElementById('analysis-run-hint');
+  const runAnalysisIndicator = document.getElementById('analysis-running-indicator');
+  const cloudPerfectStatus = document.getElementById('cloud-perfect-status');
+  let analysisRunning = false;
+
+  function setAnalysisRunning(running) {
+    analysisRunning = running;
+    if (runAnalysisBtn) runAnalysisBtn.disabled = running;
+    if (runCloudPerfectBtn) runCloudPerfectBtn.disabled = running;
+    if (runAnalysisIndicator) runAnalysisIndicator.style.display = running ? 'inline-flex' : 'none';
+  }
+
+  function markAnalysisDirty() {
+    if (analysisRunning) return;
+    if (runAnalysisBtn) runAnalysisBtn.classList.add('active');
+    if (runAnalysisHint) runAnalysisHint.textContent = '条件が変更されました。「この条件で検索」を押すと更新されます。';
+  }
+
+  function runAnalysisNow() {
+    if (analysisRunning) return;
+    setAnalysisRunning(true);
+    if (runAnalysisHint) runAnalysisHint.textContent = '検索中...';
+
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          updateAnalysis();
+          if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
+          if (runAnalysisHint) runAnalysisHint.textContent = '最新条件で表示中';
+        } finally {
+          setAnalysisRunning(false);
+        }
+      }, 0);
+    });
+  }
+
+  function runCloudPerfectSearch() {
+    if (analysisRunning) return;
+    setAnalysisRunning(true);
+    if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索（完璧条件）を実行中...';
+    if (cloudPerfectStatus) {
+      cloudPerfectStatus.textContent = `固定条件: タイプ被りなし / メガ3枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手0 / 防御重たい相手0 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
+    }
+
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          const patterns = recommendTeam([], allPokemon, currentMode, 6, {
+            minBst: false,
+            noOverlap: true,
+            maxMega: 3,
+            excludedIds: new Set(excludedPokemon),
+            maxWeakness: 0,
+            maxUncovered: 0,
+            statRequirements: [],
+            requiredTypes: [],
+            maxAtkThreats: 0,
+            maxDefThreats: 0,
+            searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
+          });
+
+          analysisSection.style.display = 'none';
+          recSection.style.display = '';
+          renderPatterns(patterns, []);
+          if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
+          if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
+          if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
+          if (cloudPerfectStatus && patterns.length === 0) {
+            cloudPerfectStatus.textContent = '条件一致なし。';
+          } else if (cloudPerfectStatus) {
+            cloudPerfectStatus.textContent = `条件一致パーティを表示中（全${patterns.length}件）`;
+          }
+        } finally {
+          setAnalysisRunning(false);
+        }
+      }, 0);
+    });
+  }
 
   // ===== Initialize =====
   async function init() {
@@ -64,6 +169,7 @@
       if (storedData) {
         try { recentPokemonIds = JSON.parse(storedData); } catch(e) {}
       }
+      excludedPokemon = loadExcludedPokemon();
 
       loadingOverlay.style.display = 'flex';
       allPokemon = await loadAllPokemon((loaded, total) => {
@@ -97,15 +203,20 @@
             e.target.classList.add('active');
             e.target.style.backgroundColor = TYPE_COLORS[t];
           }
-          updateAnalysis();
+          markAnalysisDirty();
         });
       });
 
       for (let i = 1; i <= 6; i++) {
         setupSearch(i);
       }
+      setupExcludeSearch();
       setupSettings();
       setupBestPairSection();
+      if (runAnalysisBtn) runAnalysisBtn.addEventListener('click', runAnalysisNow);
+      if (runCloudPerfectBtn) runCloudPerfectBtn.addEventListener('click', runCloudPerfectSearch);
+      renderExcludedList();
+      markAnalysisDirty();
       
       console.log('[App] init complete');
     } catch (err) {
@@ -216,6 +327,74 @@
     });
   }
 
+  function setupExcludeSearch() {
+    const input = document.getElementById('exclude-search');
+    const dropdown = document.getElementById('exclude-dropdown');
+    if (!input || !dropdown) return;
+
+    const renderExcludeDropdown = (items) => {
+      if (items.length === 0) {
+        dropdown.innerHTML = '<div class="dropdown-item" style="justify-content:center;color:var(--text-muted);pointer-events:none;">候補がありません</div>';
+        dropdown.classList.add('active');
+        return;
+      }
+
+      dropdown.innerHTML = items.map(p => `
+        <div class="dropdown-item" data-exclude-poke-id="${p.id}">
+          <img src="${p.sprite}" alt="" width="40" height="40" loading="lazy" onerror="this.style.visibility='hidden'">
+          <div class="poke-name">
+            ${p.jaName}
+            ${p.isMega ? '<span class="mega-badge">MEGA</span>' : ''}
+          </div>
+          <div>${p.types.map(t => createTypeBadgeHTML(t)).join('')}</div>
+        </div>
+      `).join('');
+      dropdown.classList.add('active');
+
+      dropdown.querySelectorAll('.dropdown-item[data-exclude-poke-id]').forEach(item => {
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const id = item.getAttribute('data-exclude-poke-id');
+          if (!id) return;
+          excludedPokemon.add(id);
+          saveExcludedPokemon();
+          renderExcludedList();
+          markAnalysisDirty();
+          input.value = '';
+          dropdown.classList.remove('active');
+        });
+      });
+    };
+
+    const handleInput = () => {
+      const query = input.value.toLowerCase().trim();
+      const queryKatakana = query.replace(/[\u3041-\u3096]/g, match => String.fromCharCode(match.charCodeAt(0) + 0x60));
+
+      let filtered = allPokemon.filter(p => !excludedPokemon.has(p.id));
+      if (query.length > 0) {
+        filtered = filtered.filter(p =>
+          p.jaName.toLowerCase().includes(query) ||
+          p.jaName.toLowerCase().includes(queryKatakana) ||
+          p.name.toLowerCase().includes(query) ||
+          p.id.toLowerCase().includes(query)
+        );
+      } else {
+        filtered = filtered.sort((a, b) => a.jaName.localeCompare(b.jaName, 'ja'));
+      }
+      renderExcludeDropdown(filtered.slice(0, 60));
+    };
+
+    input.addEventListener('input', handleInput);
+    input.addEventListener('focus', handleInput);
+    input.addEventListener('click', handleInput);
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#exclude-search') && !e.target.closest('#exclude-dropdown')) {
+        dropdown.classList.remove('active');
+      }
+    });
+  }
+
   function selectPokemon(slotIndex, pokemon) {
     selectedPokemon[slotIndex - 1] = pokemon;
 
@@ -277,7 +456,7 @@
     `;
 
     selectedDiv.querySelector('.btn-remove').addEventListener('click', () => removePokemon(slotIndex));
-    updateAnalysis();
+    markAnalysisDirty();
   }
 
   function removePokemon(slotIndex) {
@@ -291,7 +470,7 @@
     input.value = '';
     slot.classList.remove('filled');
     selectedDiv.innerHTML = '';
-    updateAnalysis();
+    markAnalysisDirty();
   }
 
   // ===== Settings (Mode & Filters) =====
@@ -302,50 +481,57 @@
         selector.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentMode = btn.getAttribute('data-mode');
-        updateAnalysis();
+        markAnalysisDirty();
       });
     });
 
     const bstCb = document.getElementById('filter-bst');
+    bstCb.checked = filterMinBst;
     bstCb.addEventListener('change', (e) => {
       filterMinBst = e.target.checked;
-      updateAnalysis();
+      markAnalysisDirty();
     });
 
     const overlapCb = document.getElementById('filter-overlap');
+    overlapCb.checked = filterOverlap;
     overlapCb.addEventListener('change', (e) => {
       filterOverlap = e.target.checked;
-      updateAnalysis();
+      markAnalysisDirty();
     });
 
     const megaSelect = document.getElementById('filter-mega');
+    megaSelect.value = String(filterMaxMega);
     megaSelect.addEventListener('change', (e) => {
       filterMaxMega = parseInt(e.target.value, 10);
-      updateAnalysis();
+      markAnalysisDirty();
     });
 
     const weaknessSelect = document.getElementById('filter-weakness');
+    weaknessSelect.value = filterMaxWeakness;
     weaknessSelect.addEventListener('change', (e) => {
       filterMaxWeakness = e.target.value;
-      updateAnalysis();
+      markAnalysisDirty();
     });
 
     const uncoveredSelect = document.getElementById('filter-uncovered');
+    uncoveredSelect.value = filterMaxUncovered;
     uncoveredSelect.addEventListener('change', (e) => {
       filterMaxUncovered = e.target.value;
-      updateAnalysis();
+      markAnalysisDirty();
     });
 
     const atkThreatsSelect = document.getElementById('filter-atk-threats');
+    atkThreatsSelect.value = filterMaxAtkThreats;
     atkThreatsSelect.addEventListener('change', (e) => {
       filterMaxAtkThreats = e.target.value;
-      updateAnalysis();
+      markAnalysisDirty();
     });
 
     const defThreatsSelect = document.getElementById('filter-def-threats');
+    defThreatsSelect.value = filterMaxDefThreats;
     defThreatsSelect.addEventListener('change', (e) => {
       filterMaxDefThreats = e.target.value;
-      updateAnalysis();
+      markAnalysisDirty();
     });
 
     const btnAddStatReq = document.getElementById('btn-add-stat-req');
@@ -365,7 +551,7 @@
         }
         
         renderStatRequirements();
-        updateAnalysis();
+        markAnalysisDirty();
       });
     }
   }
@@ -377,6 +563,7 @@
     if (team.length === 0) {
       analysisSection.style.display = 'none';
       recSection.style.display = 'none';
+      renderExcludedList();
       return;
     }
 
@@ -403,7 +590,8 @@
         statRequirements: filterStatRequirements,
         requiredTypes: Array.from(filterRequiredTypes),
         maxAtkThreats: maxAtkThreatsVal,
-        maxDefThreats: maxDefThreatsVal
+        maxDefThreats: maxDefThreatsVal,
+        searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
       });
       renderPatterns(patterns, team);
     } else {
@@ -801,6 +989,7 @@
         const id = e.currentTarget.getAttribute('data-exclude-id');
         if (id) {
           excludedPokemon.add(id);
+          saveExcludedPokemon();
           updateAnalysis();
         }
       });
@@ -838,7 +1027,7 @@
         const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
         filterStatRequirements.splice(idx, 1);
         renderStatRequirements();
-        updateAnalysis();
+        markAnalysisDirty();
       });
     });
   }
@@ -875,6 +1064,7 @@
         const id = e.currentTarget.getAttribute('data-exclude-id');
         if (id) {
           excludedPokemon.delete(id);
+          saveExcludedPokemon();
           updateAnalysis();
         }
       });
@@ -1056,7 +1246,8 @@
         statRequirements: filterStatRequirements,
         requiredTypes: Array.from(filterRequiredTypes),
         maxAtkThreats: maxAtkThreatsVal,
-        maxDefThreats: maxDefThreatsVal
+        maxDefThreats: maxDefThreatsVal,
+        searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
       };
 
       setTimeout(() => {

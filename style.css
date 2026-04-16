@@ -161,6 +161,28 @@ body::before {
   background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
   border-color: transparent; color: white; box-shadow: 0 4px 15px var(--accent-glow);
 }
+.mode-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.analysis-running-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--accent-secondary);
+}
+.analysis-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(162, 155, 254, 0.35);
+  border-top-color: var(--accent-secondary);
+  border-radius: 50%;
+  animation: analysisSpin 0.8s linear infinite;
+}
+@keyframes analysisSpin {
+  to { transform: rotate(360deg); }
+}
 .filters-container {
   display: flex; gap: 20px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid var(--border-glass);
 }

@@ -313,154 +313,175 @@ function recommendTeam(initialTeam, allPokemon, mode = 'balanced', slotsToFill =
     }
   }
 
-  // 1匹目（起点）の候補を評価
-  const firstRanked = getRankedCandidates(initialTeam, allPokemon, mode, options, baseExcludeIds);
-  
-  if (firstRanked.length === 0) return []; // 候補ゼロ
+  const explicitPatternPoolLimit =
+    Number.isFinite(options.searchPatternPoolLimit) && options.searchPatternPoolLimit > 0
+      ? Math.floor(options.searchPatternPoolLimit)
+      : null;
+  const signatureBestPattern = new Map();
 
-  // 上位100匹を探索対象として、条件を満たすパーティを最大5パターン生成する
-  const numPatternsToFind = 5;
-  const patterns = [];
-  const maxSearchLimit = Math.min(100, firstRanked.length);
-  const foundSignatures = new Set();
+  function computeThreatCount(currentTeam) {
+    const teamDefVecs = currentTeam.map(p => {
+      const vec = window.TypeChart.getDefensiveVector(p.types, 'balanced');
+      if (p.abilities && p.abilities.includes('levitate')) vec['ground'] = 0;
+      if (p.abilities && p.abilities.includes('sap-sipper')) vec['grass'] = 0;
+      if (p.abilities && p.abilities.includes('water-absorb')) vec['water'] = 0;
+      if (p.abilities && p.abilities.includes('volt-absorb')) vec['electric'] = 0;
+      if (p.abilities && p.abilities.includes('flash-fire')) vec['fire'] = 0;
+      return vec;
+    });
 
-  for (let i = 0; i < maxSearchLimit; i++) {
-    const recommendedSet = [];
-    const currentTeam = [...initialTeam];
-    const currentExcludeIds = new Set(baseExcludeIds);
+    let atkThreats = 0;
+    let defThreats = 0;
 
-    // 起点を追加
-    const starter = firstRanked[i].pokemon;
-    const starterScore = firstRanked[i].score;
-    // 後でUI表示用にスコアを持たせておく
-    const starterWithScore = { ...starter, score: starterScore };
-    
-    recommendedSet.push(starterWithScore);
-    currentTeam.push(starter);
-    currentExcludeIds.add(starter.id);
-    if (starter.baseId) currentExcludeIds.add(starter.baseId);
+    allPokemon.forEach(opp => {
+      const defVecOpp = window.TypeChart.getDefensiveVector(opp.types, 'balanced');
+      if (opp.abilities && opp.abilities.includes('levitate')) defVecOpp['ground'] = 0;
+      if (opp.abilities && opp.abilities.includes('sap-sipper')) defVecOpp['grass'] = 0;
+      if (opp.abilities && opp.abilities.includes('water-absorb')) defVecOpp['water'] = 0;
+      if (opp.abilities && opp.abilities.includes('volt-absorb')) defVecOpp['electric'] = 0;
+      if (opp.abilities && opp.abilities.includes('flash-fire')) defVecOpp['fire'] = 0;
 
-    // 残りの枠を貪欲法で埋める
-    for (let slot = 1; slot < slotsToFill; slot++) {
-      const nextRanked = getRankedCandidates(currentTeam, allPokemon, mode, options, currentExcludeIds);
-      if (nextRanked.length > 0) {
-        const best = nextRanked[0].pokemon;
-        const bestScore = nextRanked[0].score;
-        recommendedSet.push({ ...best, score: bestScore });
-        currentTeam.push(best);
-        currentExcludeIds.add(best.id);
-        if (best.baseId) currentExcludeIds.add(best.baseId);
-      }
-    }
+      let anyoneCanHandle = false;
+      currentTeam.forEach((member, mIdx) => {
+        let canHitSE = false;
+        member.types.forEach(type => {
+          if (defVecOpp[type] >= 2) canHitSE = true;
+        });
+        let takesSE = false;
+        opp.types.forEach(oppType => {
+          if (teamDefVecs[mIdx][oppType] >= 2) takesSE = true;
+        });
+        if (canHitSE && !takesSE) anyoneCanHandle = true;
+      });
+      if (!anyoneCanHandle) atkThreats++;
 
-    // パーティ単位の総合評価（完成したパーティの防御・攻撃の全体感）
+      let noOneCanHandle = true;
+      currentTeam.forEach((member, mIdx) => {
+        let canResistAny = false;
+        opp.types.forEach(oppType => {
+          if (teamDefVecs[mIdx][oppType] <= 0.5) canResistAny = true;
+        });
+        let canHitNeutral = false;
+        member.types.forEach(type => {
+          if (defVecOpp[type] >= 1) canHitNeutral = true;
+        });
+        if (canResistAny && canHitNeutral) noOneCanHandle = false;
+      });
+      if (noOneCanHandle) defThreats++;
+    });
+
+    return { attack: atkThreats, defense: defThreats, total: atkThreats + defThreats };
+  }
+
+  function evaluateAndStorePattern(currentTeam, recommendedSet) {
     const finalDef = analyzeDefense(currentTeam);
     const finalOff = analyzeOffense(currentTeam);
-    
-    // 条件を満たすかチェック
-    let meetsCondition = true;
-    if (options.maxWeakness !== null && options.maxWeakness !== undefined) {
-      if (finalDef.penaltySum < options.maxWeakness) meetsCondition = false;
-    }
-    if (options.maxUncovered !== null && options.maxUncovered !== undefined) {
-      if (finalOff.notEffective.length > options.maxUncovered) meetsCondition = false;
-    }
+
+    if (options.maxWeakness !== null && options.maxWeakness !== undefined && finalDef.penaltySum < options.maxWeakness) return;
+    if (options.maxUncovered !== null && options.maxUncovered !== undefined && finalOff.notEffective.length > options.maxUncovered) return;
 
     if (options.statRequirements && options.statRequirements.length > 0) {
       for (const req of options.statRequirements) {
         const hasStat = currentTeam.some(p => p.stats && p.stats[req.type] >= req.val);
-        if (!hasStat) {
-          meetsCondition = false;
-          break;
-        }
+        if (!hasStat) return;
       }
     }
-    
+
     if (options.requiredTypes && options.requiredTypes.length > 0) {
       const allTypesInTeam = new Set();
       currentTeam.forEach(p => p.types.forEach(t => allTypesInTeam.add(t)));
       const hasAllRequired = options.requiredTypes.every(reqT => allTypesInTeam.has(reqT));
-      if (!hasAllRequired) meetsCondition = false;
+      if (!hasAllRequired) return;
     }
 
-    if (meetsCondition) {
-      // 追加されるメンバーのタイプ組み合わせ＋耐性特性でシグネチャを作成し、重複する組み合わせを排除する
-      const addedSig = recommendedSet.map(p => getPokemonTypeSignature(p)).sort().join('|');
-      if (!foundSignatures.has(addedSig)) {
-        foundSignatures.add(addedSig);
-        
-        // 「重たい相手」の数を算出して評価に組み込む
-        const teamDefVecs = currentTeam.map(p => {
-          const vec = window.TypeChart.getDefensiveVector(p.types, 'balanced');
-          if (p.abilities && p.abilities.includes('levitate')) vec['ground'] = 0;
-          if (p.abilities && p.abilities.includes('sap-sipper')) vec['grass'] = 0;
-          if (p.abilities && p.abilities.includes('water-absorb')) vec['water'] = 0;
-          if (p.abilities && p.abilities.includes('volt-absorb')) vec['electric'] = 0;
-          if (p.abilities && p.abilities.includes('flash-fire')) vec['fire'] = 0;
-          return vec;
-        });
+    const threatCount = computeThreatCount(currentTeam);
+    if (options.maxAtkThreats !== null && options.maxAtkThreats !== undefined && threatCount.attack > options.maxAtkThreats) return;
+    if (options.maxDefThreats !== null && options.maxDefThreats !== undefined && threatCount.defense > options.maxDefThreats) return;
 
-        let atkThreats = 0;
-        let defThreats = 0;
-        
-        allPokemon.forEach(opp => {
-          const defVecOpp = window.TypeChart.getDefensiveVector(opp.types, 'balanced');
-          if (opp.abilities && opp.abilities.includes('levitate')) defVecOpp['ground'] = 0;
-          if (opp.abilities && opp.abilities.includes('sap-sipper')) defVecOpp['grass'] = 0;
-          if (opp.abilities && opp.abilities.includes('water-absorb')) defVecOpp['water'] = 0;
-          if (opp.abilities && opp.abilities.includes('volt-absorb')) defVecOpp['electric'] = 0;
-          if (opp.abilities && opp.abilities.includes('flash-fire')) defVecOpp['fire'] = 0;
+    const addedSig = recommendedSet.map(p => p.id).sort().join('|');
+    const nextPattern = {
+      members: recommendedSet,
+      teamAnalysis: { defense: finalDef, offense: finalOff },
+      threatCount
+    };
 
-          // [攻撃面] 個として処理できるメンバーがいるか
-          let anyoneCanHandle = false;
-          currentTeam.forEach((member, mIdx) => {
-            let canHitSE = false;
-            member.types.forEach(type => {
-              if (defVecOpp[type] >= 2) canHitSE = true;
-            });
-            let takesSE = false;
-            opp.types.forEach(oppType => {
-              if (teamDefVecs[mIdx][oppType] >= 2) takesSE = true;
-            });
-            if (canHitSE && !takesSE) anyoneCanHandle = true;
-          });
-          if (!anyoneCanHandle) atkThreats++;
+    const existingPattern = signatureBestPattern.get(addedSig);
+    if (!existingPattern) {
+      signatureBestPattern.set(addedSig, nextPattern);
+      return;
+    }
 
-          // [防御面] 半減以下で受けつつ等倍以上の打点を持つメンバーがいるか
-          let noOneCanHandle = true;
-          currentTeam.forEach((member, mIdx) => {
-            let canResistAny = false;
-            opp.types.forEach(oppType => {
-              if (teamDefVecs[mIdx][oppType] <= 0.5) canResistAny = true;
-            });
-            let canHitNeutral = false;
-            member.types.forEach(type => {
-              if (defVecOpp[type] >= 1) canHitNeutral = true;
-            });
-            if (canResistAny && canHitNeutral) noOneCanHandle = false;
-          });
-          if (noOneCanHandle) defThreats++;
-        });
-        // 脅威数がフィルター上限を超えていたらスキップ
-        if (options.maxAtkThreats !== null && options.maxAtkThreats !== undefined && atkThreats > options.maxAtkThreats) {
-          // 条件を満たさないがパターン自体は記録しない
-        } else if (options.maxDefThreats !== null && options.maxDefThreats !== undefined && defThreats > options.maxDefThreats) {
-          // 条件を満たさない
-        } else {
-          patterns.push({
-            members: recommendedSet,
-            teamAnalysis: { defense: finalDef, offense: finalOff },
-            threatCount: { attack: atkThreats, defense: defThreats, total: atkThreats + defThreats }
-          });
-        }
-        if (patterns.length >= numPatternsToFind) break; // 十分集まったら終了
-      }
+    const existingTc = existingPattern.threatCount || { attack: Infinity, defense: Infinity, total: Infinity };
+    const nextTc = nextPattern.threatCount;
+    const shouldReplace =
+      nextTc.total < existingTc.total ||
+      (nextTc.total === existingTc.total && nextTc.attack < existingTc.attack) ||
+      (nextTc.total === existingTc.total && nextTc.attack === existingTc.attack && nextTc.defense < existingTc.defense) ||
+      (nextTc.total === existingTc.total && nextTc.attack === existingTc.attack && nextTc.defense === existingTc.defense &&
+        nextPattern.teamAnalysis.offense.notEffective.length < existingPattern.teamAnalysis.offense.notEffective.length);
+    if (shouldReplace) signatureBestPattern.set(addedSig, nextPattern);
+  }
+
+  function exhaustiveSearch(startIdx, currentTeam, currentExcludeIds, recommendedSet, currentMegaCount) {
+    if (explicitPatternPoolLimit && signatureBestPattern.size >= explicitPatternPoolLimit) return;
+
+    if (recommendedSet.length === slotsToFill) {
+      evaluateAndStorePattern(currentTeam, recommendedSet);
+      return;
+    }
+
+    for (let i = startIdx; i < allPokemon.length; i++) {
+      if (explicitPatternPoolLimit && signatureBestPattern.size >= explicitPatternPoolLimit) return;
+
+      const candidate = allPokemon[i];
+      if (currentExcludeIds.has(candidate.id)) continue;
+      if (candidate.baseId && currentExcludeIds.has(candidate.baseId)) continue;
+      if (candidate.isMega && currentExcludeIds.has(candidate.baseId)) continue;
+      if (candidate.isMega && (currentMegaCount + 1 > options.maxMega)) continue;
+      if (options.minBst && candidate.bst < 500) continue;
+      if (options.noOverlap && hasTypeOverlap(currentTeam, candidate)) continue;
+
+      const candidateScore = calcTotalScore(currentTeam, candidate, mode);
+      const nextExcludeIds = new Set(currentExcludeIds);
+      nextExcludeIds.add(candidate.id);
+      if (candidate.baseId) nextExcludeIds.add(candidate.baseId);
+
+      exhaustiveSearch(
+        i + 1,
+        [...currentTeam, candidate],
+        nextExcludeIds,
+        [...recommendedSet, { ...candidate, score: candidateScore }],
+        currentMegaCount + (candidate.isMega ? 1 : 0)
+      );
     }
   }
 
-  // 脅威が少ない順にソートし、上位5件に絞る
-  patterns.sort((a, b) => a.threatCount.total - b.threatCount.total);
-  const topPatterns = patterns.slice(0, numPatternsToFind);
+  if (slotsToFill <= 0) return [];
+  exhaustiveSearch(0, [...initialTeam], baseExcludeIds, [], initialTeam.filter(p => p.isMega).length);
+
+  // 脅威が少ない順にソートし、見つかったパターンを全件返す
+  const patterns = Array.from(signatureBestPattern.values());
+  patterns.sort((a, b) => {
+    const aTc = a.threatCount || { attack: Infinity, defense: Infinity, total: Infinity };
+    const bTc = b.threatCount || { attack: Infinity, defense: Infinity, total: Infinity };
+
+    if (aTc.total !== bTc.total) return aTc.total - bTc.total;
+    if (aTc.attack !== bTc.attack) return aTc.attack - bTc.attack;
+    if (aTc.defense !== bTc.defense) return aTc.defense - bTc.defense;
+
+    const aUncovered = a.teamAnalysis?.offense?.notEffective?.length ?? Infinity;
+    const bUncovered = b.teamAnalysis?.offense?.notEffective?.length ?? Infinity;
+    if (aUncovered !== bUncovered) return aUncovered - bUncovered;
+
+    const aPenalty = a.teamAnalysis?.defense?.penaltySum ?? -Infinity;
+    const bPenalty = b.teamAnalysis?.defense?.penaltySum ?? -Infinity;
+    if (aPenalty !== bPenalty) return bPenalty - aPenalty; // 0に近い（大きい）方を優先
+
+    const aBst = a.members.reduce((sum, m) => sum + (m.bst || 0), 0);
+    const bBst = b.members.reduce((sum, m) => sum + (m.bst || 0), 0);
+    return bBst - aBst;
+  });
+  const topPatterns = patterns;
 
   // 抽出されたパターンの推奨メンバーそれぞれに、同じタイプ構成を持つ代替ポケモン（Alternates）を最大15件紐付ける
   const fullTeamBaseIds = new Set(initialTeam.map(p => p.id));
