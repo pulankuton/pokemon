@@ -92,6 +92,39 @@
     }
     return res.json();
   }
+
+  async function remoteCloudPerfectStart(excludedIds) {
+    const res = await fetch(apiUrl('cloud-perfect/start'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ excludedIds })
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(t || res.statusText);
+    }
+    return res.json();
+  }
+
+  async function remoteCloudPerfectStatus(jobId) {
+    const res = await fetch(apiUrl(`cloud-perfect/status/${jobId}`));
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(t || res.statusText);
+    }
+    return res.json();
+  }
+
+  async function remoteCloudPerfectResult(jobId) {
+    const res = await fetch(apiUrl(`cloud-perfect/result/${jobId}`));
+    // 202: still running
+    if (res.status === 202) return { status: 'running' };
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(t || res.statusText);
+    }
+    return res.json();
+  }
   
   // Excluded List (Blacklist)
   let excludedPokemon = new Set();
@@ -137,8 +170,22 @@
   const runCloudPerfectBtn = document.getElementById('btn-run-cloud-perfect-search');
   const runAnalysisHint = document.getElementById('analysis-run-hint');
   const runAnalysisIndicator = document.getElementById('analysis-running-indicator');
+  const engineStatus = document.getElementById('engine-status');
   const cloudPerfectStatus = document.getElementById('cloud-perfect-status');
   let analysisRunning = false;
+  let cloudPerfectPollTimer = null;
+
+  function setEngineStatus(text) {
+    if (!engineStatus) return;
+    engineStatus.textContent = text || '';
+  }
+
+  function clearCloudPerfectPolling() {
+    if (cloudPerfectPollTimer) {
+      clearInterval(cloudPerfectPollTimer);
+      cloudPerfectPollTimer = null;
+    }
+  }
 
   function setAnalysisRunning(running) {
     analysisRunning = running;
@@ -151,6 +198,7 @@
     if (analysisRunning) return;
     if (runAnalysisBtn) runAnalysisBtn.classList.add('active');
     if (runAnalysisHint) runAnalysisHint.textContent = '条件が変更されました。「この条件で検索」を押すと更新されます。';
+    setEngineStatus(useRemoteRecommendApi() ? '実行エンジン: ☁️ Cloud（API）' : '実行エンジン: 🖥️ ローカル（ブラウザ）');
   }
 
   function runAnalysisNow() {
@@ -173,37 +221,67 @@
 
   function runCloudPerfectSearch() {
     if (analysisRunning) return;
+    clearCloudPerfectPolling();
     setAnalysisRunning(true);
     if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索（完璧条件）を実行中...';
     if (cloudPerfectStatus) {
       cloudPerfectStatus.textContent = `固定条件: タイプ被りなし / メガ3枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手0 / 防御重たい相手0 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
     }
+    setEngineStatus(useRemoteRecommendApi() ? '実行エンジン: ☁️ Cloud（API）' : '実行エンジン: 🖥️ ローカル（ブラウザ）');
 
     requestAnimationFrame(() => {
       setTimeout(async () => {
         try {
-          let patterns;
+          let patterns = null;
           if (useRemoteRecommendApi()) {
-            try {
-              const data = await remoteCloudPerfect(Array.from(excludedPokemon));
-              patterns = data.patterns || [];
-            } catch (e) {
-              console.warn('[App] remote cloud-perfect failed, local fallback:', e);
-              patterns = recommendTeam([], allPokemon, currentMode, 6, {
-                minBst: false,
-                noOverlap: true,
-                maxMega: 3,
-                excludedIds: new Set(excludedPokemon),
-                maxWeakness: 0,
-                maxUncovered: 0,
-                statRequirements: [],
-                requiredTypes: [],
-                maxAtkThreats: 0,
-                maxDefThreats: 0,
-                searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
-              });
-            }
+            // 進捗が見えるジョブ方式（クラウド実行を100%保証）
+            const start = await remoteCloudPerfectStart(Array.from(excludedPokemon));
+            const jobId = start.jobId;
+            if (cloudPerfectStatus) cloudPerfectStatus.textContent = `ジョブ開始: ${jobId}（進捗取得中...）`;
+
+            cloudPerfectPollTimer = setInterval(async () => {
+              try {
+                const st = await remoteCloudPerfectStatus(jobId);
+                const pct = (st.percent === null || st.percent === undefined) ? null : Number(st.percent);
+                const pctText = pct === null || Number.isNaN(pct) ? '--' : pct.toFixed(2);
+                if (cloudPerfectStatus) {
+                  cloudPerfectStatus.textContent =
+                    `Cloud全探索 進捗: ${st.checked ?? 0} / ${st.totalEstimate || '?'} (${pctText}%)  一致: ${st.matched ?? 0}件`;
+                }
+                if (st.status === 'done') {
+                  clearCloudPerfectPolling();
+                  const result = await remoteCloudPerfectResult(jobId);
+                  patterns = result.patterns || [];
+                  analysisSection.style.display = 'none';
+                  recSection.style.display = '';
+                  renderPatterns(patterns, []);
+                  if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
+                  if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
+                  if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
+                  if (cloudPerfectStatus && patterns.length === 0) {
+                    cloudPerfectStatus.textContent = '条件一致なし。';
+                  } else if (cloudPerfectStatus) {
+                    cloudPerfectStatus.textContent = `条件一致パーティを表示中（全${patterns.length}件）`;
+                  }
+                  setAnalysisRunning(false);
+                } else if (st.status === 'error') {
+                  clearCloudPerfectPolling();
+                  if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索 エラー';
+                  if (cloudPerfectStatus) cloudPerfectStatus.textContent = `エラー: ${st.error || 'cloud-perfect failed'}`;
+                  setAnalysisRunning(false);
+                }
+              } catch (e) {
+                clearCloudPerfectPolling();
+                if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索 エラー';
+                if (cloudPerfectStatus) cloudPerfectStatus.textContent = `エラー: ${e.message || e}`;
+                setAnalysisRunning(false);
+              }
+            }, 1000);
+
+            // この関数の finally で setAnalysisRunning(false) しない（ポーリング側で完了/失敗時に解除）
+            return;
           } else {
+            // ローカル実行（進捗表示はなし）
             patterns = recommendTeam([], allPokemon, currentMode, 6, {
               minBst: false,
               noOverlap: true,
@@ -219,16 +297,17 @@
             });
           }
 
-          analysisSection.style.display = 'none';
-          recSection.style.display = '';
-          renderPatterns(patterns, []);
-          if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
-          if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
-          if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
-          if (cloudPerfectStatus && patterns.length === 0) {
-            cloudPerfectStatus.textContent = '条件一致なし。';
-          } else if (cloudPerfectStatus) {
-            cloudPerfectStatus.textContent = `条件一致パーティを表示中（全${patterns.length}件）`;
+            analysisSection.style.display = 'none';
+            recSection.style.display = '';
+            renderPatterns(patterns, []);
+            if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
+            if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
+            if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
+            if (cloudPerfectStatus && patterns.length === 0) {
+              cloudPerfectStatus.textContent = '条件一致なし。';
+            } else if (cloudPerfectStatus) {
+              cloudPerfectStatus.textContent = `条件一致パーティを表示中（全${patterns.length}件）`;
+            }
           }
         } finally {
           setAnalysisRunning(false);
@@ -663,6 +742,7 @@
 
       let patterns;
       if (useRemoteRecommendApi()) {
+        // Cloud実行を100%保証（失敗時にローカルへ戻さずエラー表示）
         try {
           const data = await remoteRecommend({
             initialTeamIds,
@@ -671,21 +751,12 @@
             options: buildFilterOptions()
           });
           patterns = data.patterns || [];
+          setEngineStatus('実行エンジン: ☁️ Cloud（API）');
         } catch (e) {
-          console.warn('[App] remote recommend failed, local fallback:', e);
-          patterns = recommendTeam(team, allPokemon, currentMode, slots, {
-            minBst: filterMinBst,
-            noOverlap: filterOverlap,
-            maxMega: filterMaxMega,
-            excludedIds: excludedPokemon,
-            maxWeakness: filterMaxWeakness === 'none' ? null : parseInt(filterMaxWeakness, 10),
-            maxUncovered: filterMaxUncovered === 'none' ? null : parseInt(filterMaxUncovered, 10),
-            statRequirements: filterStatRequirements,
-            requiredTypes: Array.from(filterRequiredTypes),
-            maxAtkThreats: filterMaxAtkThreats === 'none' ? null : parseInt(filterMaxAtkThreats, 10),
-            maxDefThreats: filterMaxDefThreats === 'none' ? null : parseInt(filterMaxDefThreats, 10),
-            searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
-          });
+          setEngineStatus('実行エンジン: ☁️ Cloud（API） ※失敗');
+          if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud API エラー（ローカルには切り替えません）';
+          patternsContainer.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Cloud API 呼び出しに失敗しました。<br>${(e && e.message) ? e.message : e}<br><span style="font-size:0.8rem;color:var(--text-muted);">APIが動いているか、/api/health を確認してください。</span></p></div>`;
+          return;
         }
       } else {
         patterns = recommendTeam(team, allPokemon, currentMode, slots, {
@@ -701,6 +772,7 @@
           maxDefThreats: filterMaxDefThreats === 'none' ? null : parseInt(filterMaxDefThreats, 10),
           searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
         });
+        setEngineStatus('実行エンジン: 🖥️ ローカル（ブラウザ）');
       }
       renderPatterns(patterns, team);
     } else {
