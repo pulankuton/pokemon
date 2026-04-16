@@ -29,6 +29,69 @@
   const SEARCH_PROFILE = {
     patternPoolLimit: null // null の場合は上限なし
   };
+
+  /** VM上の Node API（Nginx /api プロキシ）を使うか */
+  function useRemoteRecommendApi() {
+    if (window.POKEMON_USE_LOCAL_ENGINE === true) return false;
+    const p = window.location.protocol;
+    return p === 'http:' || p === 'https:';
+  }
+
+  function apiUrl(action) {
+    const root = typeof window.POKEMON_API_ROOT === 'string' ? window.POKEMON_API_ROOT.replace(/\/$/, '') : '';
+    return `${root}/api/${action.replace(/^\//, '')}`;
+  }
+
+  function buildFilterOptions(extra = {}) {
+    const maxWeaknessVal = filterMaxWeakness === 'none' ? null : parseInt(filterMaxWeakness, 10);
+    const maxUncoveredVal = filterMaxUncovered === 'none' ? null : parseInt(filterMaxUncovered, 10);
+    const maxAtkThreatsVal = filterMaxAtkThreats === 'none' ? null : parseInt(filterMaxAtkThreats, 10);
+    const maxDefThreatsVal = filterMaxDefThreats === 'none' ? null : parseInt(filterMaxDefThreats, 10);
+    const base = {
+      minBst: filterMinBst,
+      noOverlap: filterOverlap,
+      maxMega: filterMaxMega,
+      excludedIds: Array.from(excludedPokemon),
+      maxWeakness: maxWeaknessVal,
+      maxUncovered: maxUncoveredVal,
+      statRequirements: filterStatRequirements,
+      requiredTypes: Array.from(filterRequiredTypes),
+      maxAtkThreats: maxAtkThreatsVal,
+      maxDefThreats: maxDefThreatsVal,
+      searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
+    };
+    const merged = { ...base, ...extra };
+    if (merged.excludedIds instanceof Set) {
+      merged.excludedIds = Array.from(merged.excludedIds);
+    }
+    return merged;
+  }
+
+  async function remoteRecommend(body) {
+    const res = await fetch(apiUrl('recommend'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(t || res.statusText);
+    }
+    return res.json();
+  }
+
+  async function remoteCloudPerfect(excludedIds) {
+    const res = await fetch(apiUrl('cloud-perfect'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ excludedIds })
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(t || res.statusText);
+    }
+    return res.json();
+  }
   
   // Excluded List (Blacklist)
   let excludedPokemon = new Set();
@@ -96,9 +159,9 @@
     if (runAnalysisHint) runAnalysisHint.textContent = '検索中...';
 
     requestAnimationFrame(() => {
-      setTimeout(() => {
+      setTimeout(async () => {
         try {
-          updateAnalysis();
+          await updateAnalysis();
           if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
           if (runAnalysisHint) runAnalysisHint.textContent = '最新条件で表示中';
         } finally {
@@ -117,21 +180,44 @@
     }
 
     requestAnimationFrame(() => {
-      setTimeout(() => {
+      setTimeout(async () => {
         try {
-          const patterns = recommendTeam([], allPokemon, currentMode, 6, {
-            minBst: false,
-            noOverlap: true,
-            maxMega: 3,
-            excludedIds: new Set(excludedPokemon),
-            maxWeakness: 0,
-            maxUncovered: 0,
-            statRequirements: [],
-            requiredTypes: [],
-            maxAtkThreats: 0,
-            maxDefThreats: 0,
-            searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
-          });
+          let patterns;
+          if (useRemoteRecommendApi()) {
+            try {
+              const data = await remoteCloudPerfect(Array.from(excludedPokemon));
+              patterns = data.patterns || [];
+            } catch (e) {
+              console.warn('[App] remote cloud-perfect failed, local fallback:', e);
+              patterns = recommendTeam([], allPokemon, currentMode, 6, {
+                minBst: false,
+                noOverlap: true,
+                maxMega: 3,
+                excludedIds: new Set(excludedPokemon),
+                maxWeakness: 0,
+                maxUncovered: 0,
+                statRequirements: [],
+                requiredTypes: [],
+                maxAtkThreats: 0,
+                maxDefThreats: 0,
+                searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
+              });
+            }
+          } else {
+            patterns = recommendTeam([], allPokemon, currentMode, 6, {
+              minBst: false,
+              noOverlap: true,
+              maxMega: 3,
+              excludedIds: new Set(excludedPokemon),
+              maxWeakness: 0,
+              maxUncovered: 0,
+              statRequirements: [],
+              requiredTypes: [],
+              maxAtkThreats: 0,
+              maxDefThreats: 0,
+              searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
+            });
+          }
 
           analysisSection.style.display = 'none';
           recSection.style.display = '';
@@ -557,7 +643,7 @@
   }
 
   // ===== Analysis Update =====
-  function updateAnalysis() {
+  async function updateAnalysis() {
     const team = selectedPokemon.filter(p => p !== null);
 
     if (team.length === 0) {
@@ -573,26 +659,49 @@
     if (team.length >= 1) { // 1匹からでも推薦は出す
       recSection.style.display = '';
       const slots = 6 - team.length;
-      
-      const maxWeaknessVal = filterMaxWeakness === 'none' ? null : parseInt(filterMaxWeakness, 10);
-      const maxUncoveredVal = filterMaxUncovered === 'none' ? null : parseInt(filterMaxUncovered, 10);
-      
-      const maxAtkThreatsVal = filterMaxAtkThreats === 'none' ? null : parseInt(filterMaxAtkThreats, 10);
-      const maxDefThreatsVal = filterMaxDefThreats === 'none' ? null : parseInt(filterMaxDefThreats, 10);
+      const initialTeamIds = team.map(p => p.id);
 
-      const patterns = recommendTeam(team, allPokemon, currentMode, slots, { 
-        minBst: filterMinBst, 
-        noOverlap: filterOverlap, 
-        maxMega: filterMaxMega,
-        excludedIds: excludedPokemon,
-        maxWeakness: maxWeaknessVal,
-        maxUncovered: maxUncoveredVal,
-        statRequirements: filterStatRequirements,
-        requiredTypes: Array.from(filterRequiredTypes),
-        maxAtkThreats: maxAtkThreatsVal,
-        maxDefThreats: maxDefThreatsVal,
-        searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
-      });
+      let patterns;
+      if (useRemoteRecommendApi()) {
+        try {
+          const data = await remoteRecommend({
+            initialTeamIds,
+            mode: currentMode,
+            slotsToFill: slots,
+            options: buildFilterOptions()
+          });
+          patterns = data.patterns || [];
+        } catch (e) {
+          console.warn('[App] remote recommend failed, local fallback:', e);
+          patterns = recommendTeam(team, allPokemon, currentMode, slots, {
+            minBst: filterMinBst,
+            noOverlap: filterOverlap,
+            maxMega: filterMaxMega,
+            excludedIds: excludedPokemon,
+            maxWeakness: filterMaxWeakness === 'none' ? null : parseInt(filterMaxWeakness, 10),
+            maxUncovered: filterMaxUncovered === 'none' ? null : parseInt(filterMaxUncovered, 10),
+            statRequirements: filterStatRequirements,
+            requiredTypes: Array.from(filterRequiredTypes),
+            maxAtkThreats: filterMaxAtkThreats === 'none' ? null : parseInt(filterMaxAtkThreats, 10),
+            maxDefThreats: filterMaxDefThreats === 'none' ? null : parseInt(filterMaxDefThreats, 10),
+            searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
+          });
+        }
+      } else {
+        patterns = recommendTeam(team, allPokemon, currentMode, slots, {
+          minBst: filterMinBst,
+          noOverlap: filterOverlap,
+          maxMega: filterMaxMega,
+          excludedIds: excludedPokemon,
+          maxWeakness: filterMaxWeakness === 'none' ? null : parseInt(filterMaxWeakness, 10),
+          maxUncovered: filterMaxUncovered === 'none' ? null : parseInt(filterMaxUncovered, 10),
+          statRequirements: filterStatRequirements,
+          requiredTypes: Array.from(filterRequiredTypes),
+          maxAtkThreats: filterMaxAtkThreats === 'none' ? null : parseInt(filterMaxAtkThreats, 10),
+          maxDefThreats: filterMaxDefThreats === 'none' ? null : parseInt(filterMaxDefThreats, 10),
+          searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
+        });
+      }
       renderPatterns(patterns, team);
     } else {
       recSection.style.display = 'none';
@@ -1250,35 +1359,51 @@
         searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
       };
 
-      setTimeout(() => {
+      setTimeout(async () => {
         const results = [];
         const poolNoOverlap = noOverlapCheckbox && noOverlapCheckbox.checked;
-        // 除外IDをoptsにマージ
         const mergedExcluded = new Set([...excludedPokemon, ...poolExcluded]);
         opts.excludedIds = mergedExcluded;
-        // タイプ被りなしをoptsにも反映（AI補充の4匹にも適用）
         if (poolNoOverlap) opts.noOverlap = true;
 
-        // 有効な候補（除外されていないもの）だけでペアを組む
         const activeCandidates = candidatePool.filter(p => !poolExcluded.has(p.id));
         const totalActivePairs = activeCandidates.length * (activeCandidates.length - 1) / 2;
+
+        const remoteOpts = buildFilterOptions({
+          noOverlap: poolNoOverlap,
+          excludedIds: mergedExcluded
+        });
 
         for (let i = 0; i < activeCandidates.length; i++) {
           for (let j = i + 1; j < activeCandidates.length; j++) {
             const pair = [activeCandidates[i], activeCandidates[j]];
 
-            // タイプ被りチェック
             if (poolNoOverlap) {
               const typesA = new Set(pair[0].types);
               const hasOverlap = pair[1].types.some(t => typesA.has(t));
               if (hasOverlap) continue;
             }
 
-            // この2匹を起点に、AIが残り4匹を埋める
-            const patterns = recommendTeam(pair, allPokemon, currentMode, 4, opts);
+            let patterns;
+            if (useRemoteRecommendApi()) {
+              try {
+                const data = await remoteRecommend({
+                  initialTeamIds: pair.map(p => p.id),
+                  mode: currentMode,
+                  slotsToFill: 4,
+                  options: remoteOpts
+                });
+                patterns = data.patterns || [];
+              } catch (e) {
+                console.warn('[App] remote recommend (pair) failed, local:', e);
+                patterns = recommendTeam(pair, allPokemon, currentMode, 4, opts);
+              }
+            } else {
+              patterns = recommendTeam(pair, allPokemon, currentMode, 4, opts);
+            }
 
             if (patterns.length > 0) {
-              const best = patterns[0]; // 脅威数が最小のパターン
+              const best = patterns[0];
               const completeTeam = [...pair, ...best.members];
               results.push({
                 pair,
@@ -1291,7 +1416,6 @@
           }
         }
 
-        // 脅威合計の少ない順にソート
         results.sort((a, b) => a.tc.total - b.tc.total);
         const top = results.slice(0, 30);
 
