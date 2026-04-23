@@ -1,0 +1,23 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Server (keep source, ignore installs & runtime data)
+server/node_modules/
+server/settings.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Cursor / VSCode
+.vscode/
+.cursor/
+
+# Env / secrets
+.env
+.env.*
+

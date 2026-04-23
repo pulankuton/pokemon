@@ -231,6 +231,7 @@
 
     requestAnimationFrame(() => {
       setTimeout(async () => {
+        let releaseRunningInFinally = true;
         try {
           let patterns = null;
           if (useRemoteRecommendApi()) {
@@ -279,6 +280,7 @@
             }, 1000);
 
             // この関数の finally で setAnalysisRunning(false) しない（ポーリング側で完了/失敗時に解除）
+            releaseRunningInFinally = false;
             return;
           } else {
             // ローカル実行（進捗表示はなし）
@@ -297,20 +299,19 @@
             });
           }
 
-            analysisSection.style.display = 'none';
-            recSection.style.display = '';
-            renderPatterns(patterns, []);
-            if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
-            if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
-            if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
-            if (cloudPerfectStatus && patterns.length === 0) {
-              cloudPerfectStatus.textContent = '条件一致なし。';
-            } else if (cloudPerfectStatus) {
-              cloudPerfectStatus.textContent = `条件一致パーティを表示中（全${patterns.length}件）`;
-            }
+          analysisSection.style.display = 'none';
+          recSection.style.display = '';
+          renderPatterns(patterns, []);
+          if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
+          if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
+          if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
+          if (cloudPerfectStatus && patterns.length === 0) {
+            cloudPerfectStatus.textContent = '条件一致なし。';
+          } else if (cloudPerfectStatus) {
+            cloudPerfectStatus.textContent = `条件一致パーティを表示中（全${patterns.length}件）`;
           }
         } finally {
-          setAnalysisRunning(false);
+          if (releaseRunningInFinally) setAnalysisRunning(false);
         }
       }, 0);
     });
@@ -812,6 +813,100 @@
     }
 
     renderHeatmapDefense('heatmap-labels', 'heatmap-defense', team, true, defense);
+    renderTeamThreatsIfReady(team);
+  }
+
+  function computeTeamThreats(completeTeam) {
+    let atkThreats = [];
+    let defThreats = [];
+
+    const completeTeamDefVecs = completeTeam.map(p => {
+      const vec = window.TypeChart.getDefensiveVector(p.types, 'balanced');
+      if (p.abilities && p.abilities.includes('levitate')) vec['ground'] = 0;
+      if (p.abilities && p.abilities.includes('sap-sipper')) vec['grass'] = 0;
+      if (p.abilities && p.abilities.includes('water-absorb')) vec['water'] = 0;
+      if (p.abilities && p.abilities.includes('volt-absorb')) vec['electric'] = 0;
+      if (p.abilities && p.abilities.includes('flash-fire')) vec['fire'] = 0;
+      return vec;
+    });
+
+    allPokemon.forEach(opp => {
+      const defVecOpp = window.TypeChart.getDefensiveVector(opp.types, 'balanced');
+      if (opp.abilities && opp.abilities.includes('levitate')) defVecOpp['ground'] = 0;
+      if (opp.abilities && opp.abilities.includes('sap-sipper')) defVecOpp['grass'] = 0;
+      if (opp.abilities && opp.abilities.includes('water-absorb')) defVecOpp['water'] = 0;
+      if (opp.abilities && opp.abilities.includes('volt-absorb')) defVecOpp['electric'] = 0;
+      if (opp.abilities && opp.abilities.includes('flash-fire')) defVecOpp['fire'] = 0;
+
+      // 攻撃面: 誰も「抜群を取れて、かつ弱点を突かれない」相手がいない
+      let anyoneCanHandle = false;
+      completeTeam.forEach((member, mIdx) => {
+        let canHitSE = false;
+        member.types.forEach(type => {
+          if (defVecOpp[type] >= 2) canHitSE = true;
+        });
+        let takesSE = false;
+        const mVec = completeTeamDefVecs[mIdx];
+        opp.types.forEach(oppType => {
+          if (mVec[oppType] >= 2) takesSE = true;
+        });
+        if (canHitSE && !takesSE) anyoneCanHandle = true;
+      });
+      if (!anyoneCanHandle) atkThreats.push(opp);
+
+      // 防御面: 誰も「半減以上で受けつつ等倍以上で返す」ができない相手
+      let noOneCanHandle = true;
+      completeTeam.forEach((member, mIdx) => {
+        const mVec = completeTeamDefVecs[mIdx];
+        let canResistAny = false;
+        opp.types.forEach(oppType => {
+          if (mVec[oppType] <= 0.5) canResistAny = true;
+        });
+        let canHitNeutral = false;
+        member.types.forEach(type => {
+          if (defVecOpp[type] >= 1) canHitNeutral = true;
+        });
+        if (canResistAny && canHitNeutral) noOneCanHandle = false;
+      });
+      if (noOneCanHandle) defThreats.push(opp);
+    });
+
+    atkThreats.sort((a, b) => (b.bst || 0) - (a.bst || 0));
+    defThreats.sort((a, b) => (b.bst || 0) - (a.bst || 0));
+    return { atkThreats, defThreats };
+  }
+
+  function renderThreatPills(list, borderColor) {
+    if (!list || list.length === 0) {
+      return '<span style="color:var(--success);font-size:0.85rem;">なし</span>';
+    }
+    return list.map(t => `
+      <div style="display:inline-block; margin-right:8px; margin-bottom:6px; background:rgba(0,0,0,0.2); padding:2px 8px; border-radius:12px; border:1px solid ${borderColor}; font-size:0.78rem;">
+        <img src="${t.sprite}" style="width:22px; vertical-align:middle; margin-right:4px;" onerror="this.style.display='none'">
+        ${t.jaName}
+      </div>
+    `).join('');
+  }
+
+  function renderTeamThreatsIfReady(team) {
+    const hintEl = document.getElementById('team-threats-hint');
+    const atkEl = document.getElementById('team-threats-atk');
+    const defEl = document.getElementById('team-threats-def');
+    if (!hintEl || !atkEl || !defEl) return;
+
+    if (team.length !== 6) {
+      hintEl.textContent = `いまのパーティは ${team.length}/6 匹です。6匹揃えると「重たい相手」を一覧表示します。`;
+      atkEl.innerHTML = '<span style="color:var(--text-muted); font-size:0.85rem;">6匹確定で表示</span>';
+      defEl.innerHTML = '<span style="color:var(--text-muted); font-size:0.85rem;">6匹確定で表示</span>';
+      return;
+    }
+
+    const { atkThreats, defThreats } = computeTeamThreats(team);
+    const topAtk = atkThreats.slice(0, 12);
+    const topDef = defThreats.slice(0, 12);
+    hintEl.textContent = `攻撃面 ${atkThreats.length} 匹 / 防御面 ${defThreats.length} 匹（上位のみ表示）`;
+    atkEl.innerHTML = renderThreatPills(topAtk, 'rgba(225, 112, 85, 0.45)');
+    defEl.innerHTML = renderThreatPills(topDef, 'rgba(9, 132, 227, 0.45)');
   }
 
   // ===== Render Heatmap =====

@@ -1,10 +1,17 @@
 // ==========================================
-// pokemonData.js — チャンピオンズ登場ポケモンデータ
+// pokemonData.node.js — PokeAPI データ取得＋ディスクキャッシュ（Node.js版）
 // ==========================================
 
-// チャンピオンズ登場ポケモン（通常形態 + リージョン）
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+const CACHE_FILE = path.join(__dirname, 'pokemonCache.json');
+const CACHE_VERSION = 7;
+
+// チャンピオンズ登場ポケモン
 const CHAMPIONS_ROSTER = [
-  // ===== Gen 1 =====
   { id: 'venusaur', name: 'Venusaur' },
   { id: 'charizard', name: 'Charizard' },
   { id: 'blastoise', name: 'Blastoise' },
@@ -40,7 +47,6 @@ const CHAMPIONS_ROSTER = [
   { id: 'aerodactyl', name: 'Aerodactyl' },
   { id: 'snorlax', name: 'Snorlax' },
   { id: 'dragonite', name: 'Dragonite' },
-  // ===== Gen 2 =====
   { id: 'meganium', name: 'Meganium' },
   { id: 'typhlosion', name: 'Typhlosion' },
   { id: 'typhlosion-hisui', name: 'Typhlosion (Hisui)', form: 'hisui' },
@@ -60,7 +66,6 @@ const CHAMPIONS_ROSTER = [
   { id: 'skarmory', name: 'Skarmory' },
   { id: 'houndoom', name: 'Houndoom' },
   { id: 'tyranitar', name: 'Tyranitar' },
-  // ===== Gen 3 =====
   { id: 'pelipper', name: 'Pelipper' },
   { id: 'gardevoir', name: 'Gardevoir' },
   { id: 'sableye', name: 'Sableye' },
@@ -77,7 +82,6 @@ const CHAMPIONS_ROSTER = [
   { id: 'chimecho', name: 'Chimecho' },
   { id: 'absol', name: 'Absol' },
   { id: 'glalie', name: 'Glalie' },
-  // ===== Gen 4 =====
   { id: 'torterra', name: 'Torterra' },
   { id: 'infernape', name: 'Infernape' },
   { id: 'empoleon', name: 'Empoleon' },
@@ -106,7 +110,6 @@ const CHAMPIONS_ROSTER = [
   { id: 'rotom-frost', name: 'Rotom (Frost)', form: 'frost' },
   { id: 'rotom-fan', name: 'Rotom (Fan)', form: 'fan' },
   { id: 'rotom-mow', name: 'Rotom (Mow)', form: 'mow' },
-  // ===== Gen 5 =====
   { id: 'serperior', name: 'Serperior' },
   { id: 'emboar', name: 'Emboar' },
   { id: 'samurott', name: 'Samurott' },
@@ -135,7 +138,6 @@ const CHAMPIONS_ROSTER = [
   { id: 'golurk', name: 'Golurk' },
   { id: 'hydreigon', name: 'Hydreigon' },
   { id: 'volcarona', name: 'Volcarona' },
-  // ===== Gen 6 =====
   { id: 'chesnaught', name: 'Chesnaught' },
   { id: 'delphox', name: 'Delphox' },
   { id: 'greninja', name: 'Greninja' },
@@ -166,7 +168,6 @@ const CHAMPIONS_ROSTER = [
   { id: 'avalugg', name: 'Avalugg' },
   { id: 'avalugg-hisui', name: 'Avalugg (Hisui)', form: 'hisui' },
   { id: 'noivern', name: 'Noivern' },
-  // ===== Gen 7 =====
   { id: 'decidueye', name: 'Decidueye' },
   { id: 'decidueye-hisui', name: 'Decidueye (Hisui)', form: 'hisui' },
   { id: 'incineroar', name: 'Incineroar' },
@@ -186,7 +187,6 @@ const CHAMPIONS_ROSTER = [
   { id: 'mimikyu', name: 'Mimikyu' },
   { id: 'drampa', name: 'Drampa' },
   { id: 'kommo-o', name: 'Kommo-o' },
-  // ===== Gen 8 =====
   { id: 'corviknight', name: 'Corviknight' },
   { id: 'flapple', name: 'Flapple' },
   { id: 'appletun', name: 'Appletun' },
@@ -198,13 +198,11 @@ const CHAMPIONS_ROSTER = [
   { id: 'alcremie', name: 'Alcremie' },
   { id: 'morpeko', name: 'Morpeko' },
   { id: 'dragapult', name: 'Dragapult' },
-  // ===== Legends Arceus =====
   { id: 'wyrdeer', name: 'Wyrdeer' },
   { id: 'kleavor', name: 'Kleavor' },
   { id: 'basculegion-male', name: 'Basculegion (♂)', form: 'male' },
   { id: 'basculegion-female', name: 'Basculegion (♀)', form: 'female' },
   { id: 'sneasler', name: 'Sneasler' },
-  // ===== Gen 9 =====
   { id: 'meowscarada', name: 'Meowscarada' },
   { id: 'skeledirge', name: 'Skeledirge' },
   { id: 'quaquaval', name: 'Quaquaval' },
@@ -226,22 +224,6 @@ const CHAMPIONS_ROSTER = [
   { id: 'hydrapple', name: 'Hydrapple' },
 ];
 
-// ==========================================
-// 使用率・技使用率データ（任意）
-// ==========================================
-// battle.html（選出サポート）で「相手候補の並び替え」や「相手の技を使用率で初期化」を有効化するためのデータ。
-// ここが空でも動作します（その場合は使用率=0扱い、技初期化はタイプ一致のみ）。
-//
-// 形式:
-// window.POKEMON_USAGE = {
-//   "landorus-therian": {
-//     usage: 0.42,                    // 0.0 - 1.0
-//     moves: { "ground": 0.78, "flying": 0.55, "rock": 0.21, "steel": 0.18 } // type -> 0.0 - 1.0
-//   },
-// };
-window.POKEMON_USAGE = window.POKEMON_USAGE || {};
-
-// メガシンカリスト
 const MEGA_ROSTER = [
   { id: 'venusaur-mega', name: 'Mega Venusaur', baseId: 'venusaur' },
   { id: 'charizard-mega-x', name: 'Mega Charizard X', baseId: 'charizard' },
@@ -303,67 +285,43 @@ const MEGA_ROSTER = [
   { id: 'victreebel-mega', name: 'Mega Victreebel', baseId: 'victreebel' },
 ];
 
-// メガシンカのタイプオーバーライド
 const MEGA_TYPE_OVERRIDES = {
-  'venusaur-mega':      ['grass', 'poison'],
-  'charizard-mega-x':   ['fire', 'dragon'],
-  'charizard-mega-y':   ['fire', 'flying'],
-  'blastoise-mega':     ['water'],
-  'beedrill-mega':      ['bug', 'poison'],
-  'pidgeot-mega':       ['normal', 'flying'],
-  'alakazam-mega':      ['psychic'],
-  'slowbro-mega':       ['water', 'psychic'],
-  'gengar-mega':        ['ghost', 'poison'],
-  'kangaskhan-mega':    ['normal'],
-  'pinsir-mega':        ['bug', 'flying'],
-  'gyarados-mega':      ['water', 'dark'],
-  'aerodactyl-mega':    ['rock', 'flying'],
-  'steelix-mega':       ['steel', 'ground'],
-  'scizor-mega':        ['bug', 'steel'],
-  'heracross-mega':     ['bug', 'fighting'],
-  'houndoom-mega':      ['dark', 'fire'],
-  'tyranitar-mega':     ['rock', 'dark'],
-  'gardevoir-mega':     ['psychic', 'fairy'],
-  'sableye-mega':       ['dark', 'ghost'],
-  'aggron-mega':        ['steel'],
-  'medicham-mega':      ['fighting', 'psychic'],
-  'manectric-mega':     ['electric'],
-  'sharpedo-mega':      ['water', 'dark'],
-  'camerupt-mega':      ['fire', 'ground'],
-  'altaria-mega':       ['dragon', 'fairy'],
-  'banette-mega':       ['ghost'],
-  'absol-mega':         ['dark'],
-  'glalie-mega':        ['ice'],
-  'lopunny-mega':       ['normal', 'fighting'],
-  'garchomp-mega':      ['dragon', 'ground'],
-  'lucario-mega':       ['fighting', 'steel'],
-  'abomasnow-mega':     ['grass', 'ice'],
-  'gallade-mega':       ['psychic', 'fighting'],
-  'audino-mega':        ['normal', 'fairy'],
-  'ampharos-mega':      ['electric', 'dragon'],
-  // チャンピオンズ新メガ
-  'starmie-mega':       ['water', 'psychic'],
-  'dragonite-mega':     ['dragon', 'flying'],
-  'meganium-mega':      ['grass', 'fairy'],
-  'feraligatr-mega':    ['water', 'dragon'],
-  'skarmory-mega':      ['steel', 'flying'],
-  'emboar-mega':        ['fire', 'fighting'],
-  'excadrill-mega':     ['ground', 'steel'],
-  'chandelure-mega':    ['ghost', 'fire'],
-  'golurk-mega':        ['ground', 'ghost'],
-  'chesnaught-mega':    ['grass', 'fighting'],
-  'delphox-mega':       ['fire', 'psychic'],
-  'greninja-mega':      ['water', 'dark'],
-  'floette-mega':       ['fairy'],
-  'hawlucha-mega':      ['fighting', 'flying'],
-  'crabominable-mega':  ['fighting', 'ice'],
-  'drampa-mega':        ['normal', 'dragon'],
-  'scovillain-mega':    ['grass', 'fire'],
-  'glimmora-mega':      ['rock', 'poison'],
-  'froslass-mega':      ['ice', 'ghost'],
-  'chimecho-mega':      ['psychic', 'steel'],
-  'clefable-mega':      ['fairy', 'flying'],
-  'victreebel-mega':    ['grass', 'poison'],
+  'venusaur-mega': ['grass', 'poison'], 'charizard-mega-x': ['fire', 'dragon'],
+  'charizard-mega-y': ['fire', 'flying'], 'blastoise-mega': ['water'],
+  'beedrill-mega': ['bug', 'poison'], 'pidgeot-mega': ['normal', 'flying'],
+  'alakazam-mega': ['psychic'], 'slowbro-mega': ['water', 'psychic'],
+  'gengar-mega': ['ghost', 'poison'], 'kangaskhan-mega': ['normal'],
+  'pinsir-mega': ['bug', 'flying'], 'gyarados-mega': ['water', 'dark'],
+  'aerodactyl-mega': ['rock', 'flying'], 'steelix-mega': ['steel', 'ground'],
+  'scizor-mega': ['bug', 'steel'], 'heracross-mega': ['bug', 'fighting'],
+  'houndoom-mega': ['dark', 'fire'], 'tyranitar-mega': ['rock', 'dark'],
+  'gardevoir-mega': ['psychic', 'fairy'], 'sableye-mega': ['dark', 'ghost'],
+  'aggron-mega': ['steel'], 'medicham-mega': ['fighting', 'psychic'],
+  'manectric-mega': ['electric'], 'sharpedo-mega': ['water', 'dark'],
+  'camerupt-mega': ['fire', 'ground'], 'altaria-mega': ['dragon', 'fairy'],
+  'banette-mega': ['ghost'], 'absol-mega': ['dark'], 'glalie-mega': ['ice'],
+  'lopunny-mega': ['normal', 'fighting'], 'garchomp-mega': ['dragon', 'ground'],
+  'lucario-mega': ['fighting', 'steel'], 'abomasnow-mega': ['grass', 'ice'],
+  'gallade-mega': ['psychic', 'fighting'], 'audino-mega': ['normal', 'fairy'],
+  'ampharos-mega': ['electric', 'dragon'],
+  'starmie-mega': ['water', 'psychic'], 'dragonite-mega': ['dragon', 'flying'],
+  'meganium-mega': ['grass', 'fairy'], 'feraligatr-mega': ['water', 'dragon'],
+  'skarmory-mega': ['steel', 'flying'], 'emboar-mega': ['fire', 'fighting'],
+  'excadrill-mega': ['ground', 'steel'], 'chandelure-mega': ['ghost', 'fire'],
+  'golurk-mega': ['ground', 'ghost'], 'chesnaught-mega': ['grass', 'fighting'],
+  'delphox-mega': ['fire', 'psychic'], 'greninja-mega': ['water', 'dark'],
+  'floette-mega': ['fairy'], 'hawlucha-mega': ['fighting', 'flying'],
+  'crabominable-mega': ['fighting', 'ice'], 'drampa-mega': ['normal', 'dragon'],
+  'scovillain-mega': ['grass', 'fire'], 'glimmora-mega': ['rock', 'poison'],
+  'froslass-mega': ['ice', 'ghost'], 'chimecho-mega': ['psychic', 'steel'],
+  'clefable-mega': ['fairy', 'flying'], 'victreebel-mega': ['grass', 'poison'],
+};
+
+const MEGA_ABILITY_OVERRIDES = {
+  'venusaur-mega': ['thick-fat'],
+  'charizard-mega-y': ['drought'],
+  'aggron-mega': ['filter'],
+  'altaria-mega': ['pixilate']
 };
 
 const FORM_LABELS = {
@@ -374,201 +332,143 @@ const FORM_LABELS = {
   'male': '♂', 'female': '♀'
 };
 
-const CACHE_KEY = 'pokemon_champions_v4';
-// データの組み立てロジックを変えたら必ず上げる（キャッシュ破棄用）
-const CACHE_VERSION = 7;
-
-/**
- * PokeAPIの /pokemon/{name} は、作品/形態によって「素の種名」が404になることがある。
- * その場合、ここで定義した別IDへフォールバックして取得する。
- *
- * 重要: アプリ内のIDは entry.id を維持し、API取得だけ代替IDを使う。
- */
 const POKEAPI_ID_ALIASES = {
-  // Gen7: ミミッキュはデフォルト形態が別IDになっていることがある
   'mimikyu': 'mimikyu-disguised',
-  // Gen8: モルペコはフォルム名が必要
   'morpeko': 'morpeko-full-belly'
 };
 
-/**
- * 全ポケモンデータをロード（最適化版）
- * Step 1: 通常形態のみAPIフェッチ（日本語名はspeciesからまとめて取得）
- * Step 2: メガシンカ形態もAPIフェッチ（実種族値を反映）
- */
+async function fetchJson(url) {
+  // Node.js 18+ の built-in fetch を使用
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
+  return res.json();
+}
+
 async function loadAllPokemon(onProgress) {
-  // キャッシュチェック
-  try {
-    const cached = localStorage.getItem(CACHE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (parsed.version === CACHE_VERSION && parsed.data && parsed.data.length > 0) {
-        if (onProgress) onProgress(1, 1);
-        return parsed.data;
+  // ディスクキャッシュチェック
+  if (fs.existsSync(CACHE_FILE)) {
+    try {
+      const cached = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8'));
+      if (cached.version === CACHE_VERSION && cached.data && cached.data.length > 0) {
+        console.log(`[PokemonData] Loaded ${cached.data.length} pokemon from cache`);
+        return cached.data;
       }
+    } catch (e) {
+      console.warn('[PokemonData] Cache read failed, refetching:', e.message);
     }
-  } catch (e) {
-    localStorage.removeItem(CACHE_KEY);
   }
 
+  console.log('[PokemonData] Fetching from PokeAPI...');
   const total = CHAMPIONS_ROSTER.length + MEGA_ROSTER.length;
   let loaded = 0;
-
-  // Step 1: 通常形態をバッチフェッチ
-  const baseDataMap = {}; // id -> { types, stats, bst, sprite, speciesId, abilities }
-  const jaNameMap = {};    // speciesId -> jaName
   const BATCH = 20;
 
+  const baseDataMap = {};
+  const jaNameMap = {};
+
+  // Step 1: 通常形態
   for (let i = 0; i < CHAMPIONS_ROSTER.length; i += BATCH) {
     const batch = CHAMPIONS_ROSTER.slice(i, i + BATCH);
     const results = await Promise.all(batch.map(async (entry) => {
       try {
         const primaryId = entry.id;
         const fallbackId = POKEAPI_ID_ALIASES[primaryId];
-
-        let resp = await fetch(`https://pokeapi.co/api/v2/pokemon/${primaryId}`);
-        if (!resp.ok && fallbackId) {
-          resp = await fetch(`https://pokeapi.co/api/v2/pokemon/${fallbackId}`);
+        let data;
+        try {
+          data = await fetchJson(`https://pokeapi.co/api/v2/pokemon/${primaryId}`);
+        } catch (e) {
+          if (fallbackId) data = await fetchJson(`https://pokeapi.co/api/v2/pokemon/${fallbackId}`);
+          else return { entry, data: null };
         }
-        if (!resp.ok) return { entry, data: null };
-
-        const data = await resp.json();
         return { entry, data };
-      } catch {
-        return { entry, data: null };
-      }
+      } catch { return { entry, data: null }; }
     }));
 
     for (const { entry, data } of results) {
       loaded++;
       if (onProgress) onProgress(loaded, total);
       if (!data) continue;
-
       const types = data.types.map(t => t.type.name);
       const stats = {};
       data.stats.forEach(s => { stats[s.stat.name] = s.base_stat; });
       const bst = Object.values(stats).reduce((a, b) => a + b, 0);
-      const sprite = data.sprites.front_default || data.sprites.other?.['official-artwork']?.front_default || '';
+      const sprite = data.sprites.front_default || '';
       const speciesId = data.species?.url?.match(/\/(\d+)\//)?.[1];
       const abilities = data.abilities ? data.abilities.map(a => a.ability.name) : [];
-
       baseDataMap[entry.id] = { types, stats, bst, sprite, speciesId, abilities };
     }
   }
 
-  // Step 2: Species API（日本語名）をバッチフェッチ — 重複排除
-  const uniqueSpeciesIds = [...new Set(
-    Object.values(baseDataMap).map(d => d.speciesId).filter(Boolean)
-  )];
-
+  // Step 2: Species (日本語名)
+  const uniqueSpeciesIds = [...new Set(Object.values(baseDataMap).map(d => d.speciesId).filter(Boolean))];
   for (let i = 0; i < uniqueSpeciesIds.length; i += BATCH) {
     const batch = uniqueSpeciesIds.slice(i, i + BATCH);
     const results = await Promise.all(batch.map(async (sid) => {
       try {
-        const resp = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${sid}`);
-        if (!resp.ok) return { sid, name: null };
-        const data = await resp.json();
+        const data = await fetchJson(`https://pokeapi.co/api/v2/pokemon-species/${sid}`);
         const ja = data.names.find(n => n.language.name === 'ja');
         return { sid, name: ja ? ja.name : null };
-      } catch {
-        return { sid, name: null };
-      }
+      } catch { return { sid, name: null }; }
     }));
     for (const { sid, name } of results) {
       if (name) jaNameMap[sid] = name;
     }
   }
 
-  // Step 3: 通常形態のデータ整形
+  // Step 3: アセンブル
   const allResults = [];
-
   for (const entry of CHAMPIONS_ROSTER) {
     const d = baseDataMap[entry.id];
     if (!d) continue;
-
     let jaName = entry.name;
     if (d.speciesId && jaNameMap[d.speciesId]) {
       jaName = jaNameMap[d.speciesId];
-      if (entry.form) {
-        jaName += `(${FORM_LABELS[entry.form] || entry.form})`;
-      }
+      if (entry.form) jaName += `(${FORM_LABELS[entry.form] || entry.form})`;
     }
-
     allResults.push({
-      id: entry.id,
-      name: entry.name,
-      jaName,
-      types: d.types,
-      stats: d.stats,
-      bst: d.bst,
-      sprite: d.sprite,
-      isMega: false,
-      baseId: null,
-      abilities: d.abilities || []
+      id: entry.id, name: entry.name, jaName, types: d.types,
+      stats: d.stats, bst: d.bst, sprite: d.sprite,
+      isMega: false, baseId: null, abilities: d.abilities || []
     });
   }
 
-  // メガシンカで耐性に影響する特性への変化（ハードコード）
-  const MEGA_ABILITY_OVERRIDES = {
-    'venusaur-mega': ['thick-fat'],
-    'charizard-mega-y': ['drought'],
-    'aggron-mega': ['filter'],
-    'altaria-mega': ['pixilate'] // フェアリー追加など
-  };
-
-  // Step 4: メガシンカのデータフェッチ（実種族値をPokeAPIから取得）
+  // Step 4: メガシンカ
   for (let i = 0; i < MEGA_ROSTER.length; i += BATCH) {
     const batch = MEGA_ROSTER.slice(i, i + BATCH);
     const results = await Promise.all(batch.map(async (mega) => {
       try {
-        const resp = await fetch(`https://pokeapi.co/api/v2/pokemon/${mega.id}`);
-        if (!resp.ok) return { mega, data: null };
-        const data = await resp.json();
+        const data = await fetchJson(`https://pokeapi.co/api/v2/pokemon/${mega.id}`);
         return { mega, data };
-      } catch {
-        return { mega, data: null };
-      }
+      } catch { return { mega, data: null }; }
     }));
 
     for (const { mega, data } of results) {
       loaded++;
       if (onProgress) onProgress(loaded, total);
-
       const baseData = baseDataMap[mega.baseId];
       if (!baseData) continue;
 
       let jaName = mega.name;
       if (baseData.speciesId && jaNameMap[baseData.speciesId]) {
         jaName = 'メガ' + jaNameMap[baseData.speciesId];
-        // X/Y区別
         if (mega.id.endsWith('-x')) jaName += ' X';
         if (mega.id.endsWith('-y')) jaName += ' Y';
       }
 
       const megaTypes = MEGA_TYPE_OVERRIDES[mega.id] || baseData.types;
       const megaAbilities = MEGA_ABILITY_OVERRIDES[mega.id] || baseData.abilities || [];
-
-      let stats = baseData.stats;
-      let bst = baseData.bst;
-      let sprite = baseData.sprite;
+      let stats = baseData.stats, bst = baseData.bst, sprite = baseData.sprite;
 
       if (data) {
         stats = {};
         data.stats.forEach(s => { stats[s.stat.name] = s.base_stat; });
         bst = Object.values(stats).reduce((a, b) => a + b, 0);
-        sprite = data.sprites.front_default || data.sprites.other?.['official-artwork']?.front_default || baseData.sprite;
+        sprite = data.sprites.front_default || baseData.sprite;
       }
 
       allResults.push({
-        id: mega.id,
-        name: mega.name,
-        jaName,
-        types: megaTypes,
-        stats,
-        bst,
-        sprite,
-        isMega: true,
-        baseId: mega.baseId,
+        id: mega.id, name: mega.name, jaName, types: megaTypes,
+        stats, bst, sprite, isMega: true, baseId: mega.baseId,
         abilities: megaAbilities
       });
     }
@@ -576,25 +476,13 @@ async function loadAllPokemon(onProgress) {
 
   // キャッシュ保存
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({
-      version: CACHE_VERSION,
-      data: allResults,
-      timestamp: Date.now()
-    }));
+    fs.writeFileSync(CACHE_FILE, JSON.stringify({ version: CACHE_VERSION, data: allResults, timestamp: Date.now() }));
+    console.log(`[PokemonData] Cached ${allResults.length} pokemon to ${CACHE_FILE}`);
   } catch (e) {
-    console.warn('Cache save failed:', e);
+    console.warn('[PokemonData] Cache write failed:', e.message);
   }
 
   return allResults;
 }
 
-function clearCache() {
-  localStorage.removeItem(CACHE_KEY);
-}
-
-window.PokemonData = {
-  CHAMPIONS_ROSTER,
-  MEGA_ROSTER,
-  loadAllPokemon,
-  clearCache
-};
+module.exports = { loadAllPokemon, CHAMPIONS_ROSTER, MEGA_ROSTER };

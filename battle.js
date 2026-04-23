@@ -5,9 +5,19 @@
 (function() {
   'use strict';
 
-  const { TYPES, TYPE_NAMES_JA, TYPE_COLORS, getDefensiveVector } = window.TypeChart;
-  const { loadAllPokemon } = window.PokemonData;
-  const { analyzeDefense } = window.TeamAnalyzer;
+  // ローカル環境（file://等）でスクリプト読み込みが失敗した場合でも
+  // 認証UIだけは最低限動くよう、防御的に参照する
+  const TypeChart = window.TypeChart || {};
+  const PokemonData = window.PokemonData || {};
+  const TeamAnalyzer = window.TeamAnalyzer || {};
+
+  const TYPES = TypeChart.TYPES || [];
+  const TYPE_NAMES_JA = TypeChart.TYPE_NAMES_JA || {};
+  const TYPE_COLORS = TypeChart.TYPE_COLORS || {};
+  const getDefensiveVector = TypeChart.getDefensiveVector || (() => ({}));
+
+  const loadAllPokemon = PokemonData.loadAllPokemon || (async () => []);
+  const { analyzeDefense } = TeamAnalyzer;
 
   // ===== State =====
   let allPokemon = [];
@@ -16,6 +26,99 @@
   let myTeamMoves = [null, null, null, null, null, null];
   let oppTeamMoves = [null, null, null, null, null, null];
   let recentPokemonIds = [];
+
+  function safeBaseSpeed(p) {
+    return (p && p.stats && Number.isFinite(p.stats.speed)) ? p.stats.speed : 0;
+  }
+
+  function getUsageMeta(p) {
+    const db = window.POKEMON_USAGE || null;
+    if (!db || !p || !p.id) return null;
+    return db[p.id] || null;
+  }
+
+  function getPokemonUsage(p) {
+    const meta = getUsageMeta(p);
+    const u = meta && Number.isFinite(meta.usage) ? meta.usage : 0;
+    return Math.max(0, Math.min(1, u));
+  }
+
+  function suggestMoveTypesByUsage(pokemon, limit = 4) {
+    const meta = getUsageMeta(pokemon);
+    const typeSet = new Set();
+
+    // タイプ一致は常に含める（既存挙動を維持）
+    if (pokemon && Array.isArray(pokemon.types)) {
+      pokemon.types.forEach(t => typeSet.add(t));
+    }
+
+    // moves(type->rate) がある場合は上位から追加
+    const moves = meta && meta.moves ? meta.moves : null;
+    if (moves && typeof moves === 'object') {
+      const entries = Object.entries(moves)
+        .filter(([t, r]) => TYPES.includes(t) && Number.isFinite(r))
+        .sort((a, b) => b[1] - a[1]);
+      for (let i = 0; i < entries.length; i++) {
+        typeSet.add(entries[i][0]);
+        if (typeSet.size >= limit) break;
+      }
+    }
+
+    return Array.from(typeSet).slice(0, limit);
+  }
+
+  function getOppSortMode() {
+    const el = document.getElementById('opp-sort-mode');
+    return el ? (el.value || 'recent') : 'recent';
+  }
+
+  function shouldAutoInitOppMovesByUsage() {
+    const el = document.getElementById('opp-auto-moves-usage');
+    return !!(el && el.checked);
+  }
+
+  function sortCandidatesForSide(items, side) {
+    if (side !== 'opp') return items;
+    const mode = getOppSortMode();
+    if (mode === 'recent') return items;
+
+    const scored = items.map(p => {
+      const usage = getPokemonUsage(p);
+      const speed = safeBaseSpeed(p);
+      const speedNorm = Math.max(0, Math.min(1, speed / 200));
+      let score = 0;
+      if (mode === 'usage') score = usage;
+      else if (mode === 'speed') score = speedNorm;
+      else if (mode === 'usage_speed') score = usage * speedNorm;
+      return { p, score, speed };
+    });
+
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if ((b.speed || 0) !== (a.speed || 0)) return (b.speed || 0) - (a.speed || 0);
+      return (a.p.jaName || '').localeCompare((b.p.jaName || ''), 'ja');
+    });
+
+    return scored.map(x => x.p);
+  }
+
+  // ===== Auth Storage Helpers =====
+  const AUTH_STORAGE_KEY = 'pokemon_builder_authorized';
+  function isAuthorized() {
+    try {
+      return localStorage.getItem(AUTH_STORAGE_KEY) === 'true';
+    } catch (e) {
+      return window.__pokemon_builder_authorized === true;
+    }
+  }
+  function setAuthorized() {
+    try {
+      localStorage.setItem(AUTH_STORAGE_KEY, 'true');
+      window.__pokemon_builder_authorized = true;
+    } catch (e) {
+      window.__pokemon_builder_authorized = true;
+    }
+  }
 
   // ===== DOM References =====
   const authContainer = document.getElementById('auth-container');
@@ -37,7 +140,7 @@
     console.log('[Battle] init started');
     
     // Auth Check
-    if (!localStorage.getItem('pokemon_builder_authorized')) {
+    if (!isAuthorized()) {
       setupAuth();
       return;
     }
@@ -192,17 +295,25 @@
   }
 
   function setupAuth() {
+    if (!authInput || !authSubmit || !authError) {
+      console.warn('[Battle] auth UI elements missing');
+      return;
+    }
     const checkPassword = () => {
-      const pw = authInput.value.trim();
-      if (pw === 'champion') {
-        localStorage.setItem('pokemon_builder_authorized', 'true');
+      const pwRaw = authInput.value.replace(/\u3000/g, ' ').trim(); // 全角スペースを吸収
+      const pw = pwRaw.toLowerCase();
+      if (pw === 'champion' || pwRaw === 'チャンピオン') {
+        setAuthorized();
         authError.style.display = 'none';
         init();
       } else {
         authError.style.display = 'block';
       }
     };
-    authSubmit.addEventListener('click', checkPassword);
+    authSubmit.addEventListener('click', (e) => {
+      e.preventDefault();
+      checkPassword();
+    });
     authInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') checkPassword();
     });
@@ -276,21 +387,27 @@
       
       let filtered;
       if (query.length === 0) {
-        filtered = allPokemon.filter(p => !team.some(t => t && t.id === p.id)).sort((a, b) => {
+        filtered = allPokemon
+          .filter(p => !team.some(t => t && t.id === p.id))
+          .sort((a, b) => {
           const idxA = recentPokemonIds.indexOf(a.id);
           const idxB = recentPokemonIds.indexOf(b.id);
           if (idxA !== -1 && idxB !== -1) return idxA - idxB;
           if (idxA !== -1) return -1;
           if (idxB !== -1) return 1;
           return a.jaName.localeCompare(b.jaName, 'ja');
-        }).slice(0, 50);
+        });
+        filtered = sortCandidatesForSide(filtered, side).slice(0, 50);
       } else {
-        filtered = allPokemon.filter(p => !team.some(t => t && t.id === p.id)).filter(p => {
+        filtered = allPokemon
+          .filter(p => !team.some(t => t && t.id === p.id))
+          .filter(p => {
           return p.jaName.toLowerCase().includes(query) ||
                  p.jaName.toLowerCase().includes(queryKatakana) ||
                  p.name.toLowerCase().includes(query) ||
                  p.id.toLowerCase().includes(query);
-        }).slice(0, 50);
+        });
+        filtered = sortCandidatesForSide(filtered, side).slice(0, 50);
       }
 
       renderDropdown(dropdown, filtered, side, index);
@@ -317,12 +434,22 @@
 
     dropdown.innerHTML = items.map(p => {
       const isRecent = recentPokemonIds.includes(p.id);
+      const mode = side === 'opp' ? getOppSortMode() : 'recent';
+      const showUsage = side === 'opp' && (mode === 'usage' || mode === 'usage_speed');
+      const showSpeed = side === 'opp' && (mode === 'speed' || mode === 'usage_speed');
+      const usagePct = Math.round(getPokemonUsage(p) * 100);
+      const baseS = safeBaseSpeed(p);
+      const extraBadges = [
+        showUsage ? `<span style="font-size:0.6rem; background:rgba(108, 92, 231, 0.25); border:1px solid rgba(108, 92, 231, 0.45); padding:2px 4px; border-radius:4px; margin-left:6px;">使用率 ${usagePct}%</span>` : '',
+        showSpeed ? `<span style="font-size:0.6rem; background:rgba(225, 112, 85, 0.20); border:1px solid rgba(225, 112, 85, 0.45); padding:2px 4px; border-radius:4px; margin-left:6px;">S ${baseS}</span>` : ''
+      ].join('');
       return `
       <div class="dropdown-item" data-poke-id="${p.id}">
         <img src="${p.sprite}" alt="" width="40" height="40" onerror="this.style.visibility='hidden'">
         <div class="poke-name">
           ${p.jaName} ${p.isMega ? '<span class="mega-badge">MEGA</span>' : ''}
           ${isRecent ? '<span style="font-size:0.6rem; background:var(--accent-primary); padding:2px 4px; border-radius:4px; margin-left:4px;">最近</span>' : ''}
+          ${extraBadges}
         </div>
         <div>${p.types.map(t => createTypeBadgeHTML(t)).join('')}</div>
       </div>
@@ -340,7 +467,9 @@
              myTeamMoves[index] = [...pokemon.types];
           } else {
              oppTeam[index] = pokemon;
-             oppTeamMoves[index] = [...pokemon.types];
+             oppTeamMoves[index] = shouldAutoInitOppMovesByUsage()
+               ? suggestMoveTypesByUsage(pokemon, 4)
+               : [...pokemon.types];
           }
           
           // 履歴更新
@@ -550,7 +679,14 @@
         let cellScore = 0; // -1 to 1
         if (dmgOut >= 2 && dmgIn < 2) cellScore = 1; // 有利
         else if (dmgOut < 2 && dmgIn >= 2) cellScore = -1; // 不利
-        else if (dmgOut >= 2 && dmgIn >= 2) cellScore = 0.5; // 不利ではないが、同等以上の殴り合い（互角寄り・素早さ依存）
+        else if (dmgOut >= 2 && dmgIn >= 2) {
+          // 不利ではないが、同等以上の殴り合い（素早さ種族値で寄せる）
+          const sMe = safeBaseSpeed(m.p);
+          const sOpp = safeBaseSpeed(o.p);
+          if (sMe > sOpp) cellScore = 0.75;
+          else if (sMe < sOpp) cellScore = 0.25;
+          else cellScore = 0.5;
+        }
         else cellScore = 0; // 微妙な打ち合い
 
         // 見た目上はポイント加算など
@@ -559,6 +695,12 @@
         if (dmgIn < 2) rankPoints += 1;
         if (dmgIn >= 2) rankPoints -= 2; // 弱点突かれるのは痛い
         if (dmgOut === 0) rankPoints -= 1; // 無効化されるのは痛い
+        if (dmgOut >= 2 && dmgIn >= 2) {
+          const sMe = safeBaseSpeed(m.p);
+          const sOpp = safeBaseSpeed(o.p);
+          if (sMe > sOpp) rankPoints += 0.5;
+          else if (sMe < sOpp) rankPoints -= 0.5;
+        }
         
         individualScores.set(m.p.id, individualScores.get(m.p.id) + rankPoints);
 
@@ -568,6 +710,8 @@
         if (cellScore === 1) { bgColor = 'rgba(9, 132, 227, 0.3)'; icon = '🔵 有利'; }
         if (cellScore === -1) { bgColor = 'rgba(225, 112, 85, 0.3)'; icon = '🔴 不利'; }
         if (cellScore === 0.5){ bgColor = 'rgba(253, 203, 110, 0.3)'; icon = '⚡ 殴合'; }
+        if (cellScore === 0.75){ bgColor = 'rgba(253, 203, 110, 0.3)'; icon = '⚡ 殴合(+S)'; }
+        if (cellScore === 0.25){ bgColor = 'rgba(253, 203, 110, 0.3)'; icon = '⚡ 殴合(-S)'; }
 
         matrixHtml += `<td style="padding:8px; border:1px solid var(--border-glass); background:${bgColor};">${icon}<br><span style="font-size:0.6rem; color:var(--text-muted);">与:×${dmgOut} / 被:×${dmgIn}</span></td>`;
       });

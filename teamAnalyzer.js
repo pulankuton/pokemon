@@ -296,7 +296,7 @@ function getRankedCandidates(team, allPokemon, mode, options, excludeIds) {
  * @param {Object} options { minBst: boolean, noOverlap: boolean, maxMega: number, excludedIds: Set }
  * @returns {Array} [[p1, p2, p3, p4], [...], [...], [...], [...]]
  */
-function recommendTeam(initialTeam, allPokemon, mode = 'balanced', slotsToFill = 4, options = { minBst: false, noOverlap: false, maxMega: 6, excludedIds: new Set() }) {
+async function recommendTeam(initialTeam, allPokemon, mode = 'balanced', slotsToFill = 4, options = { minBst: false, noOverlap: false, maxMega: 6, excludedIds: new Set() }) {
   const baseExcludeIds = new Set(initialTeam.map(p => p.id));
   for (const p of initialTeam) {
     if (p.baseId) baseExcludeIds.add(p.baseId);
@@ -319,84 +319,368 @@ function recommendTeam(initialTeam, allPokemon, mode = 'balanced', slotsToFill =
       : null;
   const signatureBestPattern = new Map();
 
-  function computeThreatCount(currentTeam) {
-    const teamDefVecs = currentTeam.map(p => {
-      const vec = window.TypeChart.getDefensiveVector(p.types, 'balanced');
-      if (p.abilities && p.abilities.includes('levitate')) vec['ground'] = 0;
-      if (p.abilities && p.abilities.includes('sap-sipper')) vec['grass'] = 0;
-      if (p.abilities && p.abilities.includes('water-absorb')) vec['water'] = 0;
-      if (p.abilities && p.abilities.includes('volt-absorb')) vec['electric'] = 0;
-      if (p.abilities && p.abilities.includes('flash-fire')) vec['fire'] = 0;
-      return vec;
+  const initialMegaCount = initialTeam.filter(p => p.isMega).length;
+
+  const TC = window.TypeChart || {};
+  const TYPES_LIST = TC.TYPES || [];
+  const typeNameToBit = {};
+  for (let ti = 0; ti < TYPES_LIST.length; ti++) {
+    typeNameToBit[TYPES_LIST[ti]] = 1 << ti;
+  }
+
+  let initialTeamTypeBits = 0;
+  for (const p of initialTeam) {
+    for (let ti = 0; ti < p.types.length; ti++) {
+      const b = typeNameToBit[p.types[ti]];
+      if (b) initialTeamTypeBits |= b;
+    }
+  }
+
+  /** 必須タイプのうち typeBits にまだ現れていないタイプの種類数（配列内の重複は1種類として数える） */
+  function countDistinctMissingRequired(typeBits) {
+    if (!options.requiredTypes || options.requiredTypes.length === 0) return 0;
+    let missingMask = 0;
+    for (let ri = 0; ri < options.requiredTypes.length; ri++) {
+      const bit = typeNameToBit[options.requiredTypes[ri]];
+      if (bit && (typeBits & bit) === 0) missingMask |= bit;
+    }
+    let n = 0;
+    for (let m = missingMask; m; m &= m - 1) n++;
+    return n;
+  }
+
+  /**
+   * 同タイプ（耐性変化なし）の候補を代表1匹にまとめるモード。
+   * 精度（条件一致可否）を落とさないため、以下のときだけ有効にする:
+   * - BSTフィルタを使っていない（minBst=false）
+   * - ステータス最低要件を使っていない（statRequirementsなし）
+   *
+   * ※結果の列挙をID単位で完全維持するのではなく、耐性表示目的で「同タイプ代表」で良い場合の高速化。
+   */
+  const enableSameTypeGrouping =
+    !options.minBst &&
+    (!options.statRequirements || options.statRequirements.length === 0);
+
+  function hasResistanceChangingAbility(p) {
+    if (!p || !p.abilities || p.abilities.length === 0) return false;
+    for (let i = 0; i < p.abilities.length; i++) {
+      if (IMMUNITY_ABILITIES[p.abilities[i]]) return true;
+    }
+    return false;
+  }
+
+  function plainTypeGroupKey(p) {
+    const typesKey = [...p.types].sort().join('-');
+    const megaKey = p.isMega ? 'mega' : 'base';
+    return `${typesKey}#${megaKey}`;
+  }
+
+  // 探索ループはこの配列のみを走査（静的に不可能な候補を除外して枝数を削減）
+  const searchPool = [];
+  const searchPoolTypeMask = [];
+  const repByPlainGroupKey = new Map();     // key -> representative pokemon
+
+  for (const candidate of allPokemon) {
+    if (baseExcludeIds.has(candidate.id)) continue;
+    if (candidate.baseId && baseExcludeIds.has(candidate.baseId)) continue;
+    if (candidate.isMega && baseExcludeIds.has(candidate.baseId)) continue;
+    if (candidate.isMega && initialMegaCount >= options.maxMega) continue;
+    if (options.minBst && candidate.bst < 500) continue;
+    // タイプ被りなし: 固定メンバーのタイプと被る候補はどの枝でも採れないため木から除外
+    if (options.noOverlap && hasTypeOverlap(initialTeam, candidate)) continue;
+
+    if (enableSameTypeGrouping && !hasResistanceChangingAbility(candidate)) {
+      const key = plainTypeGroupKey(candidate);
+      const rep = repByPlainGroupKey.get(key);
+      if (!rep) {
+        repByPlainGroupKey.set(key, candidate);
+        searchPool.push(candidate);
+        let tm = 0;
+        for (let ti = 0; ti < candidate.types.length; ti++) {
+          const b = typeNameToBit[candidate.types[ti]];
+          if (b) tm |= b;
+        }
+        searchPoolTypeMask.push(tm);
+      } else {
+        // 同タイプ（耐性変化なし）は代表1匹に集約（表示も代表のみ）
+      }
+      continue;
+    }
+
+    // 通常: そのまま探索候補へ
+    searchPool.push(candidate);
+    let tm = 0;
+    for (let ti = 0; ti < candidate.types.length; ti++) {
+      const b = typeNameToBit[candidate.types[ti]];
+      if (b) tm |= b;
+    }
+    searchPoolTypeMask.push(tm);
+  }
+
+  // 必須タイプ: 残り枠で理論上カバーし得ない場合は探索全体を打ち切り（1匹あたりタイプは最大2つ／重複指定は1種類として数える）
+  if (options.requiredTypes && options.requiredTypes.length > 0) {
+    if (countDistinctMissingRequired(initialTeamTypeBits) > slotsToFill * 2) return [];
+  }
+
+  // 最低ステータス要件: 固定枠で満たせず、searchPool 内に1匹も満たす個体がいなければ打ち切り
+  if (options.statRequirements && options.statRequirements.length > 0) {
+    for (let si = 0; si < options.statRequirements.length; si++) {
+      const req = options.statRequirements[si];
+      const satisfiedInitial = initialTeam.some(p => p.stats && p.stats[req.type] >= req.val);
+      if (satisfiedInitial) continue;
+      const satisfiedPool = searchPool.some(p => p.stats && p.stats[req.type] >= req.val);
+      if (!satisfiedPool) return [];
+    }
+  }
+
+  function combinationCount(n, r) {
+    if (!Number.isFinite(n) || !Number.isFinite(r) || r < 0 || n < 0 || r > n) return 0;
+    if (r === 0 || r === n) return 1;
+    const k = Math.min(r, n - r);
+    let result = 1;
+    for (let i = 1; i <= k; i++) {
+      result = (result * (n - k + i)) / i;
+      if (!Number.isFinite(result)) return Number.MAX_SAFE_INTEGER;
+    }
+    return Math.round(result);
+  }
+
+  const estimatedSearchSpace = {
+    eligibleCount: searchPool.length,
+    eligibleMegaCount: searchPool.filter(p => p.isMega).length,
+    estimatedLeafTotal: combinationCount(searchPool.length, slotsToFill)
+  };
+
+  // ===== 【最適化1】相手ポケモンの防御ベクトルを事前キャッシュ =====
+  // computeThreatCount 内で毎回 getDefensiveVector を呼んでいた処理を
+  // 探索開始前に1回だけ計算してキャッシュする（特性による上書きも込み）
+  const oppDefVecsCache = new Array(allPokemon.length);
+  for (let oi = 0; oi < allPokemon.length; oi++) {
+    const opp = allPokemon[oi];
+    const vec = TC.getDefensiveVector(opp.types);
+    // IMMUNITY_ABILITIES による上書きを全て適用（computeThreatCount と同一ロジック）
+    if (opp.abilities) {
+      for (let ai = 0; ai < opp.abilities.length; ai++) {
+        const overrides = IMMUNITY_ABILITIES[opp.abilities[ai]];
+        if (overrides) {
+          const keys = Object.keys(overrides);
+          for (let ki = 0; ki < keys.length; ki++) {
+            const newVal = overrides[keys[ki]];
+            if (vec[keys[ki]] > newVal) vec[keys[ki]] = newVal;
+          }
+        }
+      }
+    }
+    oppDefVecsCache[oi] = vec;
+  }
+
+  // ===== 【最適化2】searchPool・initialTeam の防御ベクトルを事前キャッシュ =====
+  // computeThreatCount 内のチーム側 getDefensiveVector も事前計算
+  const searchPoolDefVec = new Array(searchPool.length);
+  for (let si = 0; si < searchPool.length; si++) {
+    const p = searchPool[si];
+    const vec = TC.getDefensiveVector(p.types);
+    if (p.abilities) {
+      for (let ai = 0; ai < p.abilities.length; ai++) {
+        const overrides = IMMUNITY_ABILITIES[p.abilities[ai]];
+        if (overrides) {
+          const keys = Object.keys(overrides);
+          for (let ki = 0; ki < keys.length; ki++) {
+            const newVal = overrides[keys[ki]];
+            if (vec[keys[ki]] > newVal) vec[keys[ki]] = newVal;
+          }
+        }
+      }
+    }
+    searchPoolDefVec[si] = vec;
+  }
+
+  const initialTeamDefVecs = new Array(initialTeam.length);
+  for (let ii = 0; ii < initialTeam.length; ii++) {
+    const p = initialTeam[ii];
+    const vec = TC.getDefensiveVector(p.types);
+    if (p.abilities) {
+      for (let ai = 0; ai < p.abilities.length; ai++) {
+        const overrides = IMMUNITY_ABILITIES[p.abilities[ai]];
+        if (overrides) {
+          const keys = Object.keys(overrides);
+          for (let ki = 0; ki < keys.length; ki++) {
+            const newVal = overrides[keys[ki]];
+            if (vec[keys[ki]] > newVal) vec[keys[ki]] = newVal;
+          }
+        }
+      }
+    }
+    initialTeamDefVecs[ii] = vec;
+  }
+
+  // searchPool のインデックスからキャッシュ済み防御ベクトルを引くためのMap
+  const pokemonIdToSearchPoolIdx = new Map();
+  for (let si = 0; si < searchPool.length; si++) {
+    pokemonIdToSearchPoolIdx.set(searchPool[si].id, si);
+  }
+
+  // ===== Local progress (optional) =====
+  // 同期ロジックはUIを止めやすいため、進捗表示が必要な場合のみ一定間隔でイベントループに戻す。
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  const progressYieldMs = Number.isFinite(options.progressYieldMs) ? options.progressYieldMs : 20;
+  const enableProgressYield = !!onProgress;
+  const shouldCancel = typeof options.shouldCancel === 'function' ? options.shouldCancel : null;
+  let searchAborted = false;
+  const startTimeMs = Date.now();
+  let visitedNodes = 0;   // forループ/再帰の巡回回数目安
+  let leafEvaluated = 0;  // slotsToFill 到達回数
+  let lastEmitMs = 0;
+
+  async function cooperativeCancelCheck() {
+    if (!shouldCancel || searchAborted) return;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    if (shouldCancel()) searchAborted = true;
+  }
+
+  if (enableProgressYield) {
+    onProgress({
+      phase: 'start',
+      visitedNodes,
+      leafEvaluated,
+      bestPatterns: signatureBestPattern.size,
+      elapsedMs: 0,
+      eligibleCount: estimatedSearchSpace.eligibleCount,
+      estimatedLeafTotal: estimatedSearchSpace.estimatedLeafTotal,
+      progressPercent: estimatedSearchSpace.estimatedLeafTotal > 0 ? 0 : null
     });
+  }
+
+  async function maybeYield() {
+    if (!enableProgressYield) return;
+    const now = Date.now();
+    if (now - lastEmitMs < progressYieldMs) return;
+    lastEmitMs = now;
+    onProgress({
+      phase: 'progress',
+      visitedNodes,
+      leafEvaluated,
+      bestPatterns: signatureBestPattern.size,
+      elapsedMs: now - startTimeMs,
+      eligibleCount: estimatedSearchSpace.eligibleCount,
+      estimatedLeafTotal: estimatedSearchSpace.estimatedLeafTotal,
+      progressPercent: estimatedSearchSpace.estimatedLeafTotal > 0
+        ? Math.min((leafEvaluated / estimatedSearchSpace.estimatedLeafTotal) * 100, 99.9)
+        : null
+    });
+    // UI更新/イベント処理のために1フレーム譲る
+    await new Promise(resolve => setTimeout(resolve, 0));
+    if (shouldCancel && shouldCancel()) searchAborted = true;
+  }
+
+  // ===== 【最適化1+2+4】computeThreatCount: キャッシュ参照＆forループ統一 =====
+  function computeThreatCount(currentTeam, teamDefVecsArg) {
+    const teamLen = currentTeam.length;
+    const oppLen = allPokemon.length;
 
     let atkThreats = 0;
     let defThreats = 0;
 
-    allPokemon.forEach(opp => {
-      const defVecOpp = window.TypeChart.getDefensiveVector(opp.types, 'balanced');
-      if (opp.abilities && opp.abilities.includes('levitate')) defVecOpp['ground'] = 0;
-      if (opp.abilities && opp.abilities.includes('sap-sipper')) defVecOpp['grass'] = 0;
-      if (opp.abilities && opp.abilities.includes('water-absorb')) defVecOpp['water'] = 0;
-      if (opp.abilities && opp.abilities.includes('volt-absorb')) defVecOpp['electric'] = 0;
-      if (opp.abilities && opp.abilities.includes('flash-fire')) defVecOpp['fire'] = 0;
+    for (let oi = 0; oi < oppLen; oi++) {
+      const opp = allPokemon[oi];
+      const defVecOpp = oppDefVecsCache[oi]; // 【最適化1】キャッシュ済み
+      const oppTypesLen = opp.types.length;
 
+      // [攻撃面]
       let anyoneCanHandle = false;
-      currentTeam.forEach((member, mIdx) => {
+      for (let mi = 0; mi < teamLen; mi++) {
+        const member = currentTeam[mi];
+        const mVec = teamDefVecsArg[mi]; // 【最適化2】キャッシュ済み
         let canHitSE = false;
-        member.types.forEach(type => {
-          if (defVecOpp[type] >= 2) canHitSE = true;
-        });
+        for (let ti = 0; ti < member.types.length; ti++) {
+          if (defVecOpp[member.types[ti]] >= 2) { canHitSE = true; break; }
+        }
+        if (!canHitSE) continue;
         let takesSE = false;
-        opp.types.forEach(oppType => {
-          if (teamDefVecs[mIdx][oppType] >= 2) takesSE = true;
-        });
-        if (canHitSE && !takesSE) anyoneCanHandle = true;
-      });
+        for (let oti = 0; oti < oppTypesLen; oti++) {
+          if (mVec[opp.types[oti]] >= 2) { takesSE = true; break; }
+        }
+        if (!takesSE) { anyoneCanHandle = true; break; }
+      }
       if (!anyoneCanHandle) atkThreats++;
 
+      // [防御面]
       let noOneCanHandle = true;
-      currentTeam.forEach((member, mIdx) => {
+      for (let mi = 0; mi < teamLen; mi++) {
+        const member = currentTeam[mi];
+        const mVec = teamDefVecsArg[mi];
         let canResistAny = false;
-        opp.types.forEach(oppType => {
-          if (teamDefVecs[mIdx][oppType] <= 0.5) canResistAny = true;
-        });
+        for (let oti = 0; oti < oppTypesLen; oti++) {
+          if (mVec[opp.types[oti]] <= 0.5) { canResistAny = true; break; }
+        }
+        if (!canResistAny) continue;
         let canHitNeutral = false;
-        member.types.forEach(type => {
-          if (defVecOpp[type] >= 1) canHitNeutral = true;
-        });
-        if (canResistAny && canHitNeutral) noOneCanHandle = false;
-      });
+        for (let ti = 0; ti < member.types.length; ti++) {
+          if (defVecOpp[member.types[ti]] >= 1) { canHitNeutral = true; break; }
+        }
+        if (canHitNeutral) { noOneCanHandle = false; break; }
+      }
       if (noOneCanHandle) defThreats++;
-    });
+    }
 
     return { attack: atkThreats, defense: defThreats, total: atkThreats + defThreats };
   }
 
-  function evaluateAndStorePattern(currentTeam, recommendedSet) {
+  // ===== 【最適化5】evaluateAndStorePattern: フィルター順序最適化 =====
+  // 軽いフィルターを先に、重い computeThreatCount を最後に
+  function evaluateAndStorePattern(currentTeam, recommendedSet, teamDefVecsArg) {
+    // 1. 軽いフィルター: 必須タイプチェック（ビット演算で超高速化可能だが、既にビットで簡易可能）
+    if (options.requiredTypes && options.requiredTypes.length > 0) {
+      let teamTypeBits = 0;
+      for (let mi = 0; mi < currentTeam.length; mi++) {
+        for (let ti = 0; ti < currentTeam[mi].types.length; ti++) {
+          const b = typeNameToBit[currentTeam[mi].types[ti]];
+          if (b) teamTypeBits |= b;
+        }
+      }
+      for (let ri = 0; ri < options.requiredTypes.length; ri++) {
+        const reqBit = typeNameToBit[options.requiredTypes[ri]];
+        if (reqBit && (teamTypeBits & reqBit) === 0) return;
+      }
+    }
+
+    // 2. 軽いフィルター: ステータス要件
+    if (options.statRequirements && options.statRequirements.length > 0) {
+      for (let si = 0; si < options.statRequirements.length; si++) {
+        const req = options.statRequirements[si];
+        let hasStat = false;
+        for (let mi = 0; mi < currentTeam.length; mi++) {
+          if (currentTeam[mi].stats && currentTeam[mi].stats[req.type] >= req.val) { hasStat = true; break; }
+        }
+        if (!hasStat) return;
+      }
+    }
+
+    // 3. 中程度: 防御/攻撃分析
     const finalDef = analyzeDefense(currentTeam);
     const finalOff = analyzeOffense(currentTeam);
 
     if (options.maxWeakness !== null && options.maxWeakness !== undefined && finalDef.penaltySum < options.maxWeakness) return;
     if (options.maxUncovered !== null && options.maxUncovered !== undefined && finalOff.notEffective.length > options.maxUncovered) return;
 
-    if (options.statRequirements && options.statRequirements.length > 0) {
-      for (const req of options.statRequirements) {
-        const hasStat = currentTeam.some(p => p.stats && p.stats[req.type] >= req.val);
-        if (!hasStat) return;
+    // 4. 最重量: 脅威カウント（キャッシュ済みベクトルを引数で受け取る）
+    const threatCount = computeThreatCount(currentTeam, teamDefVecsArg);
+    if (options.maxAtkThreats !== null && options.maxAtkThreats !== undefined) {
+      const filterMode = options.atkThreatsMode === 'eq' ? 'eq' : 'lte';
+      if (filterMode === 'eq') {
+        if (threatCount.attack !== options.maxAtkThreats) return;
+      } else {
+        if (threatCount.attack > options.maxAtkThreats) return;
       }
     }
-
-    if (options.requiredTypes && options.requiredTypes.length > 0) {
-      const allTypesInTeam = new Set();
-      currentTeam.forEach(p => p.types.forEach(t => allTypesInTeam.add(t)));
-      const hasAllRequired = options.requiredTypes.every(reqT => allTypesInTeam.has(reqT));
-      if (!hasAllRequired) return;
+    if (options.maxDefThreats !== null && options.maxDefThreats !== undefined) {
+      const filterMode = options.defThreatsMode === 'eq' ? 'eq' : 'lte';
+      if (filterMode === 'eq') {
+        if (threatCount.defense !== options.maxDefThreats) return;
+      } else {
+        if (threatCount.defense > options.maxDefThreats) return;
+      }
     }
-
-    const threatCount = computeThreatCount(currentTeam);
-    if (options.maxAtkThreats !== null && options.maxAtkThreats !== undefined && threatCount.attack > options.maxAtkThreats) return;
-    if (options.maxDefThreats !== null && options.maxDefThreats !== undefined && threatCount.defense > options.maxDefThreats) return;
 
     const addedSig = recommendedSet.map(p => p.id).sort().join('|');
     const nextPattern = {
@@ -422,42 +706,100 @@ function recommendTeam(initialTeam, allPokemon, mode = 'balanced', slotsToFill =
     if (shouldReplace) signatureBestPattern.set(addedSig, nextPattern);
   }
 
-  function exhaustiveSearch(startIdx, currentTeam, currentExcludeIds, recommendedSet, currentMegaCount) {
+  // ===== 【最適化3】exhaustiveSearch: push/pop でメモリ割り当て削減 =====
+  /**
+   * @param {number} branchTypeBits 追加枠で選んだポケモンのタイプのビット和（必須タイプ枝刈り・noOverlap 時の枠内被り判定に使用）
+   */
+  const mutableCurrentTeam = [...initialTeam];
+  const mutableRecommendedSet = [];
+  const mutableTeamDefVecs = initialTeamDefVecs.slice(); // 【最適化2】チーム防御ベクトル配列を mutable に管理
+  const mutableExcludeIds = new Set(baseExcludeIds); // push/pop でID管理
+
+  async function exhaustiveSearch(startIdx, currentMegaCount, branchTypeBits) {
+    if (searchAborted) return;
     if (explicitPatternPoolLimit && signatureBestPattern.size >= explicitPatternPoolLimit) return;
 
-    if (recommendedSet.length === slotsToFill) {
-      evaluateAndStorePattern(currentTeam, recommendedSet);
+    if (mutableRecommendedSet.length === slotsToFill) {
+      leafEvaluated++;
+      if (enableProgressYield && (leafEvaluated & 1023) === 0) await maybeYield();
+      if (searchAborted) return;
+      // evaluateAndStorePattern にはスナップショットを渡す必要がある（members が外部に保存されるため）
+      evaluateAndStorePattern(mutableCurrentTeam, mutableRecommendedSet.slice(), mutableTeamDefVecs);
       return;
     }
 
-    for (let i = startIdx; i < allPokemon.length; i++) {
+    const slotsLeft = slotsToFill - mutableRecommendedSet.length;
+    if (slotsLeft > 0 && options.requiredTypes && options.requiredTypes.length > 0) {
+      const fullBits = initialTeamTypeBits | branchTypeBits;
+      if (countDistinctMissingRequired(fullBits) > slotsLeft * 2) return;
+    }
+
+    for (let i = startIdx; i < searchPool.length; i++) {
+      if (searchAborted) return;
       if (explicitPatternPoolLimit && signatureBestPattern.size >= explicitPatternPoolLimit) return;
+      visitedNodes++;
+      if (enableProgressYield && (visitedNodes & 4095) === 0) await maybeYield();
+      if (searchAborted) return;
+      if (shouldCancel && (visitedNodes & 4095) === 0) await cooperativeCancelCheck();
+      if (searchAborted) return;
 
-      const candidate = allPokemon[i];
-      if (currentExcludeIds.has(candidate.id)) continue;
-      if (candidate.baseId && currentExcludeIds.has(candidate.baseId)) continue;
-      if (candidate.isMega && currentExcludeIds.has(candidate.baseId)) continue;
+      const candidate = searchPool[i];
+      if (mutableExcludeIds.has(candidate.id)) continue;
+      if (candidate.baseId && mutableExcludeIds.has(candidate.baseId)) continue;
+      if (candidate.isMega && mutableExcludeIds.has(candidate.baseId)) continue;
       if (candidate.isMega && (currentMegaCount + 1 > options.maxMega)) continue;
-      if (options.minBst && candidate.bst < 500) continue;
-      if (options.noOverlap && hasTypeOverlap(currentTeam, candidate)) continue;
+      const candMask = searchPoolTypeMask[i];
+      if (options.noOverlap) {
+        if (candMask & branchTypeBits) continue;
+      }
 
-      const candidateScore = calcTotalScore(currentTeam, candidate, mode);
-      const nextExcludeIds = new Set(currentExcludeIds);
-      nextExcludeIds.add(candidate.id);
-      if (candidate.baseId) nextExcludeIds.add(candidate.baseId);
+      const candidateScore = calcTotalScore(mutableCurrentTeam, candidate, mode);
 
-      exhaustiveSearch(
+      // 【最適化3】push/pop パターン: 配列/Set の複製を回避
+      const addedIds = [candidate.id];
+      if (candidate.baseId) addedIds.push(candidate.baseId);
+      for (let ai = 0; ai < addedIds.length; ai++) mutableExcludeIds.add(addedIds[ai]);
+      mutableCurrentTeam.push(candidate);
+      mutableRecommendedSet.push({ ...candidate, score: candidateScore });
+      mutableTeamDefVecs.push(searchPoolDefVec[i]); // 【最適化2】キャッシュ済みベクトルを追加
+
+      await exhaustiveSearch(
         i + 1,
-        [...currentTeam, candidate],
-        nextExcludeIds,
-        [...recommendedSet, { ...candidate, score: candidateScore }],
-        currentMegaCount + (candidate.isMega ? 1 : 0)
+        currentMegaCount + (candidate.isMega ? 1 : 0),
+        branchTypeBits | candMask
       );
+
+      // pop で元に戻す
+      mutableTeamDefVecs.pop();
+      mutableRecommendedSet.pop();
+      mutableCurrentTeam.pop();
+      for (let ai = 0; ai < addedIds.length; ai++) mutableExcludeIds.delete(addedIds[ai]);
+
+      if (searchAborted) return;
     }
   }
 
   if (slotsToFill <= 0) return [];
-  exhaustiveSearch(0, [...initialTeam], baseExcludeIds, [], initialTeam.filter(p => p.isMega).length);
+  await exhaustiveSearch(
+    0,
+    initialMegaCount,
+    0
+  );
+
+  if (searchAborted) return [];
+
+  if (enableProgressYield) {
+    onProgress({
+      phase: 'done',
+      visitedNodes,
+      leafEvaluated,
+      bestPatterns: signatureBestPattern.size,
+      elapsedMs: Date.now() - startTimeMs,
+      eligibleCount: estimatedSearchSpace.eligibleCount,
+      estimatedLeafTotal: estimatedSearchSpace.estimatedLeafTotal,
+      progressPercent: 100
+    });
+  }
 
   // 脅威が少ない順にソートし、見つかったパターンを全件返す
   const patterns = Array.from(signatureBestPattern.values());
@@ -483,26 +825,8 @@ function recommendTeam(initialTeam, allPokemon, mode = 'balanced', slotsToFill =
   });
   const topPatterns = patterns;
 
-  // 抽出されたパターンの推奨メンバーそれぞれに、同じタイプ構成を持つ代替ポケモン（Alternates）を最大15件紐付ける
-  const fullTeamBaseIds = new Set(initialTeam.map(p => p.id));
-  for (const p of initialTeam) { if (p.baseId) fullTeamBaseIds.add(p.baseId); }
-  
-  topPatterns.forEach(pat => {
-    pat.members.forEach(member => {
-      const targetSig = getPokemonTypeSignature(member);
-      
-      const alts = allPokemon.filter(p => {
-        if (p.id === member.id) return false;
-        if (fullTeamBaseIds.has(p.id) || fullTeamBaseIds.has(p.baseId)) return false;
-        if (options.excludedIds && (options.excludedIds.has(p.id) || options.excludedIds.has(p.baseId))) return false;
-        if (options.minBst && p.bst < 500) return false;
-        
-        return getPokemonTypeSignature(p) === targetSig;
-      });
-      alts.sort((a, b) => (b.bst || 0) - (a.bst || 0));
-      member.alternates = alts.slice(0, 15);
-    });
-  });
+  // 追加候補の「他候補(同タイプ)」表示は不要との要望により、alternates は付与しない
+  // （耐性確認が目的のため、同タイプ代表化の時も含めて代表のみ表示する）
 
   return topPatterns;
 }

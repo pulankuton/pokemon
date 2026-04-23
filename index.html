@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <meta name="description" content="ポケモンチャンピオンズのタイプ相性を分析し、最適なパーティ構成を提案するツール">
+  <meta name="theme-color" content="#0b1020">
   <title>ポケモンチャンピオンズ タイプ相性補完ビルダー</title>
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -115,8 +117,10 @@
           <span class="analysis-spinner"></span>
           検索中...
         </span>
+        <button type="button" id="btn-cancel-analysis" class="mode-btn" style="display:none; padding:10px 16px; border-color:var(--danger); color:var(--danger);">⏹ 検索を中止</button>
       </div>
       <div id="engine-status" style="margin-top:6px; font-size:0.78rem; color:var(--text-muted);"></div>
+      <div id="analysis-progress-status" style="margin-top:6px; font-size:0.78rem; color:var(--text-muted);"></div>
       <div id="cloud-perfect-status" style="margin-top:8px; font-size:0.78rem; color:var(--text-muted);"></div>
     </section>
 
@@ -151,6 +155,7 @@
                 <option value="0">0枠 (なし)</option>
                 <option value="1">1枠まで</option>
                 <option value="2">2枠まで</option>
+                <option value="3">3枠まで</option>
               </select>
             </label>
           </div>
@@ -179,25 +184,39 @@
           <div style="display: flex; gap: 16px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--border-glass);">
             <label class="filter-label" style="color: var(--danger);">
               <span style="font-weight: 500;">⚔️ 攻撃面の重たい相手:</span>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <select id="filter-atk-threats-mode" class="filter-select" style="width:110px;">
+                  <option value="lte">以下</option>
+                  <option value="eq">ちょうど</option>
+                </select>
               <select id="filter-atk-threats" class="filter-select">
                 <option value="none">制限なし</option>
                 <option value="0">0匹（完璧）</option>
+                <option value="1">1匹以下</option>
+                <option value="2">2匹以下</option>
+                <option value="3">3匹以下</option>
+                <option value="4">4匹以下</option>
                 <option value="5">5匹以下</option>
-                <option value="10">10匹以下</option>
-                <option value="20">20匹以下</option>
-                <option value="30">30匹以下</option>
               </select>
+              </div>
             </label>
             <label class="filter-label" style="color: var(--accent-primary);">
               <span style="font-weight: 500;">🛡️ 防御面の重たい相手:</span>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <select id="filter-def-threats-mode" class="filter-select" style="width:110px;">
+                  <option value="lte">以下</option>
+                  <option value="eq">ちょうど</option>
+                </select>
               <select id="filter-def-threats" class="filter-select">
                 <option value="none">制限なし</option>
                 <option value="0">0匹（完璧）</option>
+                <option value="1">1匹以下</option>
+                <option value="2">2匹以下</option>
+                <option value="3">3匹以下</option>
+                <option value="4">4匹以下</option>
                 <option value="5">5匹以下</option>
-                <option value="10">10匹以下</option>
-                <option value="20">20匹以下</option>
-                <option value="30">30匹以下</option>
               </select>
+              </div>
             </label>
           </div>
 
@@ -272,6 +291,25 @@
           <div style="display:flex; gap:3px; margin-bottom:4px;" id="heatmap-labels"></div>
           <div id="heatmap-defense"></div>
         </div>
+
+        <!-- 重たい相手（6匹確定時） -->
+        <div class="analysis-grid" style="margin-top:18px;">
+          <div class="analysis-section" style="grid-column: 1 / -1;">
+            <h3><span class="icon">⚠️</span> 6匹確定時の「重たい相手」</h3>
+            <p class="description">タイプ相性（STAB想定）ベースで、受け/抜群の両面から“対応しづらい相手”を抽出します</p>
+            <div id="team-threats-hint" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;"></div>
+            <div style="display:flex; gap:14px; flex-wrap:wrap;">
+              <div style="flex:1; min-width:260px;">
+                <div style="font-weight:700; font-size:0.85rem; color:var(--danger); margin-bottom:8px;">⚔️ 攻撃面の重たい相手</div>
+                <div id="team-threats-atk" style="line-height:1.9;"></div>
+              </div>
+              <div style="flex:1; min-width:260px;">
+                <div style="font-weight:700; font-size:0.85rem; color:var(--accent-primary); margin-bottom:8px;">🛡️ 防御面の重たい相手</div>
+                <div id="team-threats-def" style="line-height:1.9;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -309,24 +347,59 @@
         </label>
       </div>
 
-      <div id="pool-excluded-container" style="display:none; margin-bottom:12px; padding:10px; background:rgba(0,0,0,0.1); border-radius:8px;">
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">🚫 除外中（クリックで解除）</div>
-        <div id="pool-excluded-list" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+      <div style="margin-bottom:12px;">
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">🚫 共通の除外ポケモンに追加（メインと共通）</div>
+        <div style="position:relative;">
+          <input type="text" id="pool-exclude-search" class="search-input" placeholder="除外するポケモン名を入力..." autocomplete="off" style="width:100%;">
+          <div id="pool-exclude-dropdown" class="dropdown"></div>
+        </div>
       </div>
 
       <button id="btn-analyze-pairs" class="mode-btn" style="padding:8px 24px; font-size:0.9rem; background:var(--accent-primary); color:white; border:none; border-radius:8px; cursor:pointer;">⚡ ベストチームを探す</button>
+      <button type="button" id="btn-cancel-pair-search" class="mode-btn" style="display:none; padding:8px 16px; font-size:0.85rem; margin-left:8px; cursor:pointer; border-color:var(--danger); color:var(--danger);">⏹ 検索を中止</button>
       <button id="btn-clear-pool" class="mode-btn" style="padding:8px 16px; font-size:0.85rem; margin-left:8px; cursor:pointer;">🗑️ プールをクリア</button>
+      <div id="pair-search-status" style="margin-top:10px; font-size:0.8rem; color:var(--text-muted);"></div>
       
       <div id="pair-results" style="margin-top:20px;"></div>
+      
+      <div id="bestcore-saved-container" style="display:none; margin-top:22px; padding-top:16px; border-top:1px solid var(--border-glass);">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+          <div style="font-weight:700; font-size:0.9rem; color:var(--text-secondary);">💾 保存したベストコア結果</div>
+          <span style="flex:1;"></span>
+          <button type="button" id="btn-clear-bestcore-saved" class="mode-btn" style="padding:6px 14px; font-size:0.8rem; border-color:var(--danger); color:var(--danger);">全削除</button>
+        </div>
+        <div id="bestcore-saved-list" style="display:flex; flex-direction:column; gap:10px;"></div>
+      </div>
     </section>
 
   </main>
   </div> <!-- /app-container -->
 
   <!-- Scripts -->
+  <script>
+    // GitHub Pages など「静的ホスティング」では /api が無いのでローカル(ブラウザ)エンジン固定。
+    // ローカルサーバー（server/server.js）で開いて /api/health が応答する場合のみ Cloud(API) を有効化する。
+    window.POKEMON_USE_LOCAL_ENGINE = true;
+    (async () => {
+      try {
+        const ctrl = new AbortController();
+        setTimeout(() => ctrl.abort(), 600);
+        const res = await fetch('./api/health', { cache: 'no-store', signal: ctrl.signal });
+        if (res.ok) {
+          window.POKEMON_USE_LOCAL_ENGINE = false;
+          window.POKEMON_API_ROOT = '';
+        }
+      } catch (e) {}
+    })();
+  </script>
   <script src="typeChart.js?v=18"></script>
   <script src="pokemonData.js?v=18"></script>
   <script src="teamAnalyzer.js?v=18"></script>
   <script src="app.js?v=20"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+  </script>
 </body>
 </html>
