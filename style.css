@@ -304,6 +304,23 @@ body::before {
 }
 .btn-lock-card:hover { background: rgba(81,207,102,0.2); border-color: var(--success); transform: scale(1.1); }
 
+/* 同タイプ代替候補リスト */
+.alternates-list {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(255,255,255,0.08);
+}
+.alternate-icon {
+  width: 36px; height: 36px; cursor: pointer;
+  border-radius: 8px; border: 2px solid transparent;
+  transition: var(--transition); image-rendering: pixelated;
+  opacity: 0.5; background: rgba(255,255,255,0.03);
+}
+.alternate-icon:hover { opacity: 0.85; border-color: var(--accent-secondary); transform: scale(1.1); }
+.alternate-icon.active {
+  opacity: 1; border-color: var(--accent-primary);
+  box-shadow: 0 0 8px var(--accent-glow); background: rgba(108, 92, 231, 0.15);
+}
+
 /* 除外リストのバッジ */
 .excluded-badge {
   display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;

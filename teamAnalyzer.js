@@ -379,6 +379,7 @@ async function recommendTeam(initialTeam, allPokemon, mode = 'balanced', slotsTo
   const searchPool = [];
   const searchPoolTypeMask = [];
   const repByPlainGroupKey = new Map();     // key -> representative pokemon
+  const typeGroupMembers = new Map();       // key -> [all pokemon with same type]
 
   for (const candidate of allPokemon) {
     if (baseExcludeIds.has(candidate.id)) continue;
@@ -394,6 +395,7 @@ async function recommendTeam(initialTeam, allPokemon, mode = 'balanced', slotsTo
       const rep = repByPlainGroupKey.get(key);
       if (!rep) {
         repByPlainGroupKey.set(key, candidate);
+        typeGroupMembers.set(key, [candidate]);
         searchPool.push(candidate);
         let tm = 0;
         for (let ti = 0; ti < candidate.types.length; ti++) {
@@ -402,7 +404,8 @@ async function recommendTeam(initialTeam, allPokemon, mode = 'balanced', slotsTo
         }
         searchPoolTypeMask.push(tm);
       } else {
-        // 同タイプ（耐性変化なし）は代表1匹に集約（表示も代表のみ）
+        // 同タイプ（耐性変化なし）は代表1匹に集約（代替候補として記録）
+        typeGroupMembers.get(key).push(candidate);
       }
       continue;
     }
@@ -825,8 +828,20 @@ async function recommendTeam(initialTeam, allPokemon, mode = 'balanced', slotsTo
   });
   const topPatterns = patterns;
 
-  // 追加候補の「他候補(同タイプ)」表示は不要との要望により、alternates は付与しない
-  // （耐性確認が目的のため、同タイプ代表化の時も含めて代表のみ表示する）
+  // 同タイプ代替候補を各memberに付与
+  // 同じタイプ構成の全ポケモンをalternatesとして表示する
+  if (enableSameTypeGrouping) {
+    for (const pat of topPatterns) {
+      for (let mi = 0; mi < pat.members.length; mi++) {
+        const m = pat.members[mi];
+        const key = plainTypeGroupKey(m);
+        const group = typeGroupMembers.get(key);
+        if (group && group.length > 1) {
+          pat.members[mi] = { ...m, alternates: group.filter(g => g.id !== m.id) };
+        }
+      }
+    }
+  }
 
   return topPatterns;
 }

@@ -267,6 +267,7 @@ function recommendTeamSync(params) {
   const searchPool = [];
   const searchPoolTypeMask = [];
   const repByPlainGroupKey = new Map();
+  const typeGroupMembers = new Map(); // key -> [all pokemon with same type]
 
   for (const candidate of allPokemon) {
     if (baseExcludeIds.has(candidate.id)) continue;
@@ -280,6 +281,7 @@ function recommendTeamSync(params) {
       const key = plainTypeGroupKey(candidate);
       if (!repByPlainGroupKey.has(key)) {
         repByPlainGroupKey.set(key, candidate);
+        typeGroupMembers.set(key, [candidate]);
         searchPool.push(candidate);
         let tm = 0;
         for (let ti = 0; ti < candidate.types.length; ti++) {
@@ -287,6 +289,8 @@ function recommendTeamSync(params) {
           if (b) tm |= b;
         }
         searchPoolTypeMask.push(tm);
+      } else {
+        typeGroupMembers.get(key).push(candidate);
       }
       continue;
     }
@@ -584,8 +588,23 @@ function recommendTeamSync(params) {
 
   exhaustiveSearch(0, initialMegaCount, 0, 0);
 
-  // ソート
+  // 同タイプ代替候補を各memberに付与
   const patterns = Array.from(signatureBestPattern.values());
+  if (enableSameTypeGrouping) {
+    for (const pat of patterns) {
+      for (let mi = 0; mi < pat.members.length; mi++) {
+        const m = pat.members[mi];
+        const key = plainTypeGroupKey(m);
+        const group = typeGroupMembers.get(key);
+        if (group && group.length > 1) {
+          // 代表以外のポケモンをalternatesとして付与
+          pat.members[mi] = { ...m, alternates: group.filter(g => g.id !== m.id) };
+        }
+      }
+    }
+  }
+
+  // ソート
   patterns.sort((a, b) => {
     const aTc = a.threatCount || { attack: Infinity, defense: Infinity, total: Infinity };
     const bTc = b.threatCount || { attack: Infinity, defense: Infinity, total: Infinity };

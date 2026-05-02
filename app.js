@@ -225,7 +225,7 @@
     setAnalysisRunning(true);
     if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索（完璧条件）を実行中...';
     if (cloudPerfectStatus) {
-      cloudPerfectStatus.textContent = `固定条件: タイプ被りなし / メガ3枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手0 / 防御重たい相手0 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
+      cloudPerfectStatus.textContent = `固定条件: タイプ被りあり / メガ2枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手0 / 防御重たい相手0 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
     }
     setEngineStatus(useRemoteRecommendApi() ? '実行エンジン: ☁️ Cloud（API）' : '実行エンジン: 🖥️ ローカル（ブラウザ）');
 
@@ -284,10 +284,10 @@
             return;
           } else {
             // ローカル実行（進捗表示はなし）
-            patterns = recommendTeam([], allPokemon, currentMode, 6, {
+            patterns = await recommendTeam([], allPokemon, currentMode, 6, {
               minBst: false,
-              noOverlap: true,
-              maxMega: 3,
+              noOverlap: false,
+              maxMega: 2,
               excludedIds: new Set(excludedPokemon),
               maxWeakness: 0,
               maxUncovered: 0,
@@ -760,7 +760,7 @@
           return;
         }
       } else {
-        patterns = recommendTeam(team, allPokemon, currentMode, slots, {
+        patterns = await recommendTeam(team, allPokemon, currentMode, slots, {
           minBst: filterMinBst,
           noOverlap: filterOverlap,
           maxMega: filterMaxMega,
@@ -1563,10 +1563,10 @@
                 patterns = data.patterns || [];
               } catch (e) {
                 console.warn('[App] remote recommend (pair) failed, local:', e);
-                patterns = recommendTeam(pair, allPokemon, currentMode, 4, opts);
+                patterns = await recommendTeam(pair, allPokemon, currentMode, 4, opts);
               }
             } else {
-              patterns = recommendTeam(pair, allPokemon, currentMode, 4, opts);
+              patterns = await recommendTeam(pair, allPokemon, currentMode, 4, opts);
             }
 
             if (patterns.length > 0) {

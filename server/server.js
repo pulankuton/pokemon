@@ -193,8 +193,8 @@ app.post('/api/cloud-perfect/start', (req, res) => {
 async function runCloudPerfectJob(job, excludedIds) {
   const mergedOptions = {
     minBst: false,
-    noOverlap: true,
-    maxMega: 3,
+    noOverlap: false,
+    maxMega: 2,
     excludedIds,
     maxWeakness: 0,
     maxUncovered: 0,
@@ -337,7 +337,7 @@ app.post('/api/cloud-perfect', async (req, res) => {
   try {
     const { excludedIds = [] } = req.body;
     const mergedOptions = {
-      minBst: false, noOverlap: true, maxMega: 3,
+      minBst: false, noOverlap: false, maxMega: 2,
       excludedIds, maxWeakness: 0, maxUncovered: 0,
       statRequirements: [], requiredTypes: [],
       maxAtkThreats: 0, maxDefThreats: 0,

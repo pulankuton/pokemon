@@ -551,19 +551,60 @@
     }
     matchupHtml += '</div>';
 
+    // バトルデータ（使用率・技・持ち物）
+    const usageMeta = getUsageMeta(pokemon);
+    let usageBadgeHtml = '';
+    let battleDataHtml = '';
+    if (usageMeta) {
+      const usagePct = Math.round(usageMeta.usage * 100);
+      const rankStr = usageMeta.rank ? `#${usageMeta.rank}` : '';
+      usageBadgeHtml = `<span style="font-size:0.6rem; background:rgba(108, 92, 231, 0.25); border:1px solid rgba(108, 92, 231, 0.45); padding:2px 6px; border-radius:6px; margin-left:8px; white-space:nowrap;">📊 ${rankStr} 使用率${usagePct}%</span>`;
+
+      // 技名リスト
+      if (usageMeta.moveNames && usageMeta.moveNames.length > 0) {
+        const moveListHtml = usageMeta.moveNames.slice(0, 5).map(m => {
+          const ratePct = m.rate != null ? `<span style="color:var(--accent-secondary); font-weight:600;">${m.rate}%</span>` : '';
+          return `<span style="display:inline-flex; align-items:center; gap:3px; padding:1px 6px; background:rgba(255,255,255,0.04); border-radius:4px; white-space:nowrap;">${m.name} ${ratePct}</span>`;
+        }).join('');
+        battleDataHtml += `
+          <div style="display:flex; align-items:flex-start; gap:4px; margin-top:6px;">
+            <span style="color:var(--text-muted); width:50px; font-weight:bold; margin-top:2px; flex-shrink:0; font-size:0.6rem;">📊 技</span>
+            <div style="flex:1; display:flex; flex-wrap:wrap; gap:3px; font-size:0.6rem;">${moveListHtml}</div>
+          </div>`;
+      }
+
+      // 持ち物リスト
+      if (usageMeta.items && usageMeta.items.length > 0) {
+        const itemListHtml = usageMeta.items.slice(0, 4).map(it => {
+          const ratePct = it.rate != null ? `<span style="color:var(--warning); font-weight:600;">${it.rate}%</span>` : '';
+          return `<span style="display:inline-flex; align-items:center; gap:3px; padding:1px 6px; background:rgba(255,255,255,0.04); border-radius:4px; white-space:nowrap;">${it.name} ${ratePct}</span>`;
+        }).join('');
+        battleDataHtml += `
+          <div style="display:flex; align-items:flex-start; gap:4px; margin-top:4px;">
+            <span style="color:var(--text-muted); width:50px; font-weight:bold; margin-top:2px; flex-shrink:0; font-size:0.6rem;">🎒 持物</span>
+            <div style="flex:1; display:flex; flex-wrap:wrap; gap:3px; font-size:0.6rem;">${itemListHtml}</div>
+          </div>`;
+      }
+
+      if (battleDataHtml) {
+        battleDataHtml = `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed rgba(108, 92, 231, 0.3);">${battleDataHtml}</div>`;
+      }
+    }
+
     selectedDiv.innerHTML = `
       <div style="display:flex; gap:12px; width:100%;">
         <img src="${pokemon.sprite}" alt="" style="width:48px;height:48px;object-fit:contain;">
         <div style="flex:1;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start;">
             <div>
-              <div style="font-weight:700;">${pokemon.jaName} ${pokemon.isMega ? '<span class="mega-badge">M</span>' : ''}</div>
+              <div style="font-weight:700; display:flex; align-items:center; flex-wrap:wrap;">${pokemon.jaName} ${pokemon.isMega ? '<span class="mega-badge">M</span>' : ''}${usageBadgeHtml}</div>
               <div>${pokemon.types.map(t => createTypeBadgeHTML(t)).join('')}</div>
             </div>
             <button class="btn-remove" data-index="${index}" style="width:28px;height:28px;background:var(--danger);color:white;border:none;border-radius:4px;cursor:pointer;">✕</button>
           </div>
           ${matchupHtml}
           ${movesHtml}
+          ${battleDataHtml}
         </div>
       </div>
     `;
@@ -643,6 +684,40 @@
     return maxMod;
   }
 
+  // 技採用率を考慮した加重脅威スコア
+  // 返り値: 0〜4+ (高いほど脅威的)
+  // 例: ガブリアス vs 鋼タイプ → じしん(98.9%,×2) = 1.978 で高脅威
+  //     ガブリアス vs 妖タイプ → どくづき(24.3%,×2) = 0.486 で低脅威
+  function getWeightedThreat(attacker, attackerMoves, defender) {
+    const meta = getUsageMeta(attacker);
+    const defVec = getDefensiveVector(defender.types, 'balanced');
+    if (defender.abilities && defender.abilities.includes('levitate')) defVec['ground'] = 0;
+    if (defender.abilities && defender.abilities.includes('sap-sipper')) defVec['grass'] = 0;
+    if (defender.abilities && defender.abilities.includes('water-absorb')) defVec['water'] = 0;
+    if (defender.abilities && defender.abilities.includes('volt-absorb')) defVec['electric'] = 0;
+    if (defender.abilities && defender.abilities.includes('flash-fire')) defVec['fire'] = 0;
+
+    // 使用率データがない場合は従来の最大倍率を返す
+    if (!meta || !meta.moves) {
+      return getAttackMultiplier(attacker, attackerMoves, defender);
+    }
+
+    // 技採用率がある場合: 各技タイプの「採用率 × 倍率」の最大値を返す
+    // これにより、採用率の低い技による弱点は軽く評価される
+    let maxWeightedMod = 0;
+    let maxRawMod = 0;
+    for (const type of attackerMoves) {
+      const mult = defVec[type] !== undefined ? defVec[type] : 1;
+      const adoptionRate = meta.moves[type] !== undefined ? meta.moves[type] : 0.5;
+      const weighted = mult * adoptionRate;
+      if (weighted > maxWeightedMod) maxWeightedMod = weighted;
+      if (mult > maxRawMod) maxRawMod = mult;
+    }
+
+    // 加重値を返す（ただし最低でも生の倍率の25%は保証 = 完全無視はしない）
+    return Math.max(maxWeightedMod, maxRawMod * 0.25);
+  }
+
   function updateAnalysis() {
     const myValid = myTeam.map((p, i) => ({ p, moves: myTeamMoves[i], idx: i })).filter(x => x.p !== null);
     const oppValid = oppTeam.map((p, i) => ({ p, moves: oppTeamMoves[i], idx: i })).filter(x => x.p !== null);
@@ -674,13 +749,18 @@
       
       oppValid.forEach(o => {
         const dmgOut = getAttackMultiplier(m.p, m.moves, o.p); // 僕が与える最大ダメージ倍率
-        const dmgIn  = getAttackMultiplier(o.p, o.moves, m.p); // 相手が与える最大ダメージ倍率
+        const dmgInRaw  = getAttackMultiplier(o.p, o.moves, m.p); // 相手が与える最大ダメージ倍率(生)
+        const dmgInW = getWeightedThreat(o.p, o.moves, m.p); // 相手が与える加重脅威(採用率考慮)
+
+        // 脅威判定: 加重値 >= 1.5 なら実質的に弱点を突かれる可能性が高い
+        // (従来は >=2 だったが、採用率90%×2倍=1.8 なので1.5を閾値にする)
+        const threatThreshold = 1.5;
+        const isRealThreat = dmgInW >= threatThreshold;
 
         let cellScore = 0; // -1 to 1
-        if (dmgOut >= 2 && dmgIn < 2) cellScore = 1; // 有利
-        else if (dmgOut < 2 && dmgIn >= 2) cellScore = -1; // 不利
-        else if (dmgOut >= 2 && dmgIn >= 2) {
-          // 不利ではないが、同等以上の殴り合い（素早さ種族値で寄せる）
+        if (dmgOut >= 2 && !isRealThreat) cellScore = 1; // 有利
+        else if (dmgOut < 2 && isRealThreat) cellScore = -1; // 不利
+        else if (dmgOut >= 2 && isRealThreat) {
           const sMe = safeBaseSpeed(m.p);
           const sOpp = safeBaseSpeed(o.p);
           if (sMe > sOpp) cellScore = 0.75;
@@ -689,13 +769,13 @@
         }
         else cellScore = 0; // 微妙な打ち合い
 
-        // 見た目上はポイント加算など
+        // ポイント加算 (加重値で傾斜)
         let rankPoints = 0;
         if (dmgOut >= 2) rankPoints += 1;
-        if (dmgIn < 2) rankPoints += 1;
-        if (dmgIn >= 2) rankPoints -= 2; // 弱点突かれるのは痛い
-        if (dmgOut === 0) rankPoints -= 1; // 無効化されるのは痛い
-        if (dmgOut >= 2 && dmgIn >= 2) {
+        if (!isRealThreat) rankPoints += 1;
+        if (isRealThreat) rankPoints -= (dmgInW >= 2 ? 2 : 1.2); // 採用率低い弱点は割引
+        if (dmgOut === 0) rankPoints -= 1;
+        if (dmgOut >= 2 && isRealThreat) {
           const sMe = safeBaseSpeed(m.p);
           const sOpp = safeBaseSpeed(o.p);
           if (sMe > sOpp) rankPoints += 0.5;
@@ -713,7 +793,12 @@
         if (cellScore === 0.75){ bgColor = 'rgba(253, 203, 110, 0.3)'; icon = '⚡ 殴合(+S)'; }
         if (cellScore === 0.25){ bgColor = 'rgba(253, 203, 110, 0.3)'; icon = '⚡ 殴合(-S)'; }
 
-        matrixHtml += `<td style="padding:8px; border:1px solid var(--border-glass); background:${bgColor};">${icon}<br><span style="font-size:0.6rem; color:var(--text-muted);">与:×${dmgOut} / 被:×${dmgIn}</span></td>`;
+        // 加重値と生値が異なる場合は注釈を追加
+        const hasUsageData = getUsageMeta(o.p) && getUsageMeta(o.p).moves;
+        const threatNote = hasUsageData && dmgInRaw >= 2 && dmgInW < threatThreshold
+          ? '<br><span style="font-size:0.5rem; color:var(--accent-secondary);">📊 採用率低</span>' : '';
+
+        matrixHtml += `<td style="padding:8px; border:1px solid var(--border-glass); background:${bgColor};">${icon}<br><span style="font-size:0.6rem; color:var(--text-muted);">与:×${dmgOut} / 被:×${dmgInRaw}${hasUsageData ? `(実${dmgInW.toFixed(1)})` : ''}</span>${threatNote}</td>`;
       });
       matrixHtml += `</tr>`;
     });
@@ -765,7 +850,8 @@
           if (hasAdvantage) oppCovered.add(o.p.id);
           
           combo.forEach(m => {
-            if (getAttackMultiplier(o.p, o.moves, m.p) >= 2) weaknessPains++;
+            const wThreat = getWeightedThreat(o.p, o.moves, m.p);
+            if (wThreat >= 1.5) weaknessPains += (wThreat >= 2 ? 1 : 0.6);
           });
         });
 
