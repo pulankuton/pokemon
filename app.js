@@ -238,6 +238,7 @@
             // 進捗が見えるジョブ方式（クラウド実行を100%保証）
             const start = await remoteCloudPerfectStart(Array.from(excludedPokemon));
             const jobId = start.jobId;
+            localStorage.setItem('pokemon_builder_cloud_job', jobId);
             if (cloudPerfectStatus) cloudPerfectStatus.textContent = `ジョブ開始: ${jobId}（進捗取得中...）`;
 
             cloudPerfectPollTimer = setInterval(async () => {
@@ -251,6 +252,7 @@
                 }
                 if (st.status === 'done') {
                   clearCloudPerfectPolling();
+                  localStorage.removeItem('pokemon_builder_cloud_job');
                   const result = await remoteCloudPerfectResult(jobId);
                   patterns = result.patterns || [];
                   analysisSection.style.display = 'none';
@@ -267,12 +269,14 @@
                   setAnalysisRunning(false);
                 } else if (st.status === 'error') {
                   clearCloudPerfectPolling();
+                  localStorage.removeItem('pokemon_builder_cloud_job');
                   if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索 エラー';
                   if (cloudPerfectStatus) cloudPerfectStatus.textContent = `エラー: ${st.error || 'cloud-perfect failed'}`;
                   setAnalysisRunning(false);
                 }
               } catch (e) {
                 clearCloudPerfectPolling();
+                localStorage.removeItem('pokemon_builder_cloud_job');
                 if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索 エラー';
                 if (cloudPerfectStatus) cloudPerfectStatus.textContent = `エラー: ${e.message || e}`;
                 setAnalysisRunning(false);
@@ -315,6 +319,57 @@
         }
       }, 0);
     });
+  }
+
+  function resumeCloudPerfectPolling(jobId) {
+    if (analysisRunning) return;
+    clearCloudPerfectPolling();
+    setAnalysisRunning(true);
+    if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索（完璧条件）を復元中...';
+    setEngineStatus('実行エンジン: ☁️ Cloud（API）');
+    if (cloudPerfectStatus) cloudPerfectStatus.textContent = `ジョブ復元: ${jobId}（進捗取得中...）`;
+
+    cloudPerfectPollTimer = setInterval(async () => {
+      try {
+        const st = await remoteCloudPerfectStatus(jobId);
+        const pct = (st.percent === null || st.percent === undefined) ? null : Number(st.percent);
+        const pctText = pct === null || Number.isNaN(pct) ? '--' : pct.toFixed(2);
+        if (cloudPerfectStatus) {
+          cloudPerfectStatus.textContent =
+            `Cloud全探索 進捗: ${st.checked ?? 0} / ${st.totalEstimate || '?'} (${pctText}%)  一致: ${st.matched ?? 0}件`;
+        }
+        if (st.status === 'done') {
+          clearCloudPerfectPolling();
+          localStorage.removeItem('pokemon_builder_cloud_job');
+          const result = await remoteCloudPerfectResult(jobId);
+          let patterns = result.patterns || [];
+          analysisSection.style.display = 'none';
+          recSection.style.display = '';
+          renderPatterns(patterns, []);
+          if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
+          if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
+          if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
+          if (cloudPerfectStatus && patterns.length === 0) {
+            cloudPerfectStatus.textContent = '条件一致なし。';
+          } else if (cloudPerfectStatus) {
+            cloudPerfectStatus.textContent = `条件一致パーティを表示中（全${patterns.length}件）`;
+          }
+          setAnalysisRunning(false);
+        } else if (st.status === 'error') {
+          clearCloudPerfectPolling();
+          localStorage.removeItem('pokemon_builder_cloud_job');
+          if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索 エラー';
+          if (cloudPerfectStatus) cloudPerfectStatus.textContent = `エラー: ${st.error || 'cloud-perfect failed'}`;
+          setAnalysisRunning(false);
+        }
+      } catch (e) {
+        clearCloudPerfectPolling();
+        localStorage.removeItem('pokemon_builder_cloud_job');
+        if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索 エラー';
+        if (cloudPerfectStatus) cloudPerfectStatus.textContent = `エラー: ${e.message || e}`;
+        setAnalysisRunning(false);
+      }
+    }, 1000);
   }
 
   // ===== Initialize =====
@@ -384,6 +439,11 @@
       renderExcludedList();
       markAnalysisDirty();
       
+      const pendingCloudJob = localStorage.getItem('pokemon_builder_cloud_job');
+      if (pendingCloudJob && useRemoteRecommendApi()) {
+        resumeCloudPerfectPolling(pendingCloudJob);
+      }
+
       console.log('[App] init complete');
     } catch (err) {
       console.error('[App] init error:', err);
