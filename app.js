@@ -156,6 +156,9 @@
 
   function saveExcludedPokemon() {
     localStorage.setItem(EXCLUDED_POKEMON_STORAGE_KEY, JSON.stringify(Array.from(excludedPokemon)));
+    if (typeof applySavedPerfectFilter === 'function') {
+      applySavedPerfectFilter();
+    }
   }
 
   // ===== DOM References =====
@@ -478,6 +481,12 @@
       if (tc.attack > maxAtk) return false;
       if (tc.defense > maxDef) return false;
 
+      // 除外リストに登録されているポケモンを含むチームは非表示
+      if (excludedPokemon && excludedPokemon.size > 0) {
+        const hasExcluded = pat.team.some(p => excludedPokemon.has(p.id));
+        if (hasExcluded) return false;
+      }
+
       // 指定されたポケモン名（複数）をすべて含んでいるかチェック (AND検索)
       if (searchTerms.length > 0) {
         for (const term of searchTerms) {
@@ -489,6 +498,13 @@
 
       return true;
     });
+
+    const excludedInfo = document.getElementById('saved-filter-excluded-info');
+    if (excludedInfo) {
+      excludedInfo.textContent = excludedPokemon && excludedPokemon.size > 0
+        ? `🚫 除外ポケモン: ${excludedPokemon.size}匹適用済み`
+        : '🚫 除外ポケモン: なし';
+    }
 
     if (countSpan) {
       countSpan.textContent = `→ ${filtered.length} 件 / 全 ${savedPerfectPatterns.length} 件`;
