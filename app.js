@@ -178,6 +178,7 @@
   const runAnalysisIndicator = document.getElementById('analysis-running-indicator');
   const engineStatus = document.getElementById('engine-status');
   const cloudPerfectStatus = document.getElementById('cloud-perfect-status');
+  const analysisProgressStatus = document.getElementById('analysis-progress-status');
   const loadSavedPerfectBtn = document.getElementById('btn-load-saved-perfect');
   let analysisRunning = false;
   let cloudPerfectPollTimer = null;
@@ -234,6 +235,9 @@
     if (cloudPerfectStatus) {
       cloudPerfectStatus.textContent = `固定条件: タイプ被りなし / メガ2枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手3以下 / 防御重たい相手3以下 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
     }
+    if (analysisProgressStatus) {
+      analysisProgressStatus.textContent = '';
+    }
     setEngineStatus(useRemoteRecommendApi() ? '実行エンジン: ☁️ Cloud（API）' : '実行エンジン: 🖥️ ローカル（ブラウザ）');
 
     requestAnimationFrame(() => {
@@ -246,15 +250,15 @@
             const start = await remoteCloudPerfectStart(Array.from(excludedPokemon));
             const jobId = start.jobId;
             localStorage.setItem('pokemon_builder_cloud_job', jobId);
-            if (cloudPerfectStatus) cloudPerfectStatus.textContent = `ジョブ開始: ${jobId}（進捗取得中...）`;
+            if (analysisProgressStatus) analysisProgressStatus.textContent = `ジョブ開始: ${jobId}（進捗取得中...）`;
 
             cloudPerfectPollTimer = setInterval(async () => {
               try {
                 const st = await remoteCloudPerfectStatus(jobId);
                 const pct = (st.percent === null || st.percent === undefined) ? null : Number(st.percent);
                 const pctText = pct === null || Number.isNaN(pct) ? '--' : pct.toFixed(2);
-                if (cloudPerfectStatus) {
-                  cloudPerfectStatus.textContent =
+                if (analysisProgressStatus) {
+                  analysisProgressStatus.textContent =
                     `Cloud全探索 進捗: ${st.checked ?? 0} / ${st.totalEstimate || '?'} (${pctText}%)  一致: ${st.matched ?? 0}件`;
                 }
                 if (st.status === 'done') {
@@ -266,24 +270,24 @@
                   if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
                   if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
                   if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
-                  if (cloudPerfectStatus && patterns.length === 0) {
-                    cloudPerfectStatus.textContent = '条件一致なし。';
-                  } else if (cloudPerfectStatus) {
-                    cloudPerfectStatus.textContent = `全${patterns.length}件を取得済み — 下のフィルタで絞り込めます`;
+                  if (analysisProgressStatus && patterns.length === 0) {
+                    analysisProgressStatus.textContent = '条件一致なし。';
+                  } else if (analysisProgressStatus) {
+                    analysisProgressStatus.textContent = `全${patterns.length}件を取得済み — 下のフィルタで絞り込めます`;
                   }
                   setAnalysisRunning(false);
                 } else if (st.status === 'error') {
                   clearCloudPerfectPolling();
                   localStorage.removeItem('pokemon_builder_cloud_job');
                   if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索 エラー';
-                  if (cloudPerfectStatus) cloudPerfectStatus.textContent = `エラー: ${st.error || 'cloud-perfect failed'}`;
+                  if (analysisProgressStatus) analysisProgressStatus.textContent = `エラー: ${st.error || 'cloud-perfect failed'}`;
                   setAnalysisRunning(false);
                 }
               } catch (e) {
                 clearCloudPerfectPolling();
                 localStorage.removeItem('pokemon_builder_cloud_job');
                 if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索 エラー';
-                if (cloudPerfectStatus) cloudPerfectStatus.textContent = `エラー: ${e.message || e}`;
+                if (analysisProgressStatus) analysisProgressStatus.textContent = `エラー: ${e.message || e}`;
                 setAnalysisRunning(false);
               }
             }, 1000);
@@ -312,10 +316,10 @@
           if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
           if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
           if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
-          if (cloudPerfectStatus && patterns.length === 0) {
-            cloudPerfectStatus.textContent = '条件一致なし。';
-          } else if (cloudPerfectStatus) {
-            cloudPerfectStatus.textContent = `全${patterns.length}件を取得済み — 下のフィルタで絞り込めます`;
+          if (analysisProgressStatus && patterns.length === 0) {
+            analysisProgressStatus.textContent = '条件一致なし。';
+          } else if (analysisProgressStatus) {
+            analysisProgressStatus.textContent = `全${patterns.length}件を取得済み — 下のフィルタで絞り込めます`;
           }
         } finally {
           if (releaseRunningInFinally) setAnalysisRunning(false);
@@ -330,15 +334,15 @@
     setAnalysisRunning(true);
     if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索（完璧条件）を復元中...';
     setEngineStatus('実行エンジン: ☁️ Cloud（API）');
-    if (cloudPerfectStatus) cloudPerfectStatus.textContent = `ジョブ復元: ${jobId}（進捗取得中...）`;
+    if (analysisProgressStatus) analysisProgressStatus.textContent = `ジョブ復元: ${jobId}（進捗取得中...）`;
 
     cloudPerfectPollTimer = setInterval(async () => {
       try {
         const st = await remoteCloudPerfectStatus(jobId);
         const pct = (st.percent === null || st.percent === undefined) ? null : Number(st.percent);
         const pctText = pct === null || Number.isNaN(pct) ? '--' : pct.toFixed(2);
-        if (cloudPerfectStatus) {
-          cloudPerfectStatus.textContent =
+        if (analysisProgressStatus) {
+          analysisProgressStatus.textContent =
             `Cloud全探索 進捗: ${st.checked ?? 0} / ${st.totalEstimate || '?'} (${pctText}%)  一致: ${st.matched ?? 0}件`;
         }
         if (st.status === 'done') {
@@ -350,24 +354,24 @@
           if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
           if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
           if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
-          if (cloudPerfectStatus && patterns.length === 0) {
-            cloudPerfectStatus.textContent = '条件一致なし。';
-          } else if (cloudPerfectStatus) {
-            cloudPerfectStatus.textContent = `全${patterns.length}件を取得済み — 下のフィルタで絞り込めます`;
+          if (analysisProgressStatus && patterns.length === 0) {
+            analysisProgressStatus.textContent = '条件一致なし。';
+          } else if (analysisProgressStatus) {
+            analysisProgressStatus.textContent = `全${patterns.length}件を取得済み — 下のフィルタで絞り込めます`;
           }
           setAnalysisRunning(false);
         } else if (st.status === 'error') {
           clearCloudPerfectPolling();
           localStorage.removeItem('pokemon_builder_cloud_job');
           if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索 エラー';
-          if (cloudPerfectStatus) cloudPerfectStatus.textContent = `エラー: ${st.error || 'cloud-perfect failed'}`;
+          if (analysisProgressStatus) analysisProgressStatus.textContent = `エラー: ${st.error || 'cloud-perfect failed'}`;
           setAnalysisRunning(false);
         }
       } catch (e) {
         clearCloudPerfectPolling();
         localStorage.removeItem('pokemon_builder_cloud_job');
         if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索 エラー';
-        if (cloudPerfectStatus) cloudPerfectStatus.textContent = `エラー: ${e.message || e}`;
+        if (analysisProgressStatus) analysisProgressStatus.textContent = `エラー: ${e.message || e}`;
         setAnalysisRunning(false);
       }
     }, 1000);
@@ -393,10 +397,13 @@
   async function loadSavedPerfectResults() {
     if (analysisRunning) return;
     try {
-      if (cloudPerfectStatus) cloudPerfectStatus.textContent = '前回の保存結果を読み込み中...';
+      if (cloudPerfectStatus) {
+        cloudPerfectStatus.textContent = `固定条件: タイプ被りなし / メガ2枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手3以下 / 防御重たい相手3以下 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
+      }
+      if (analysisProgressStatus) analysisProgressStatus.textContent = '前回の保存結果を読み込み中...';
       const saved = await remoteCloudPerfectSaved();
       if (!saved || !saved.patterns || saved.patterns.length === 0) {
-        if (cloudPerfectStatus) cloudPerfectStatus.textContent = '保存結果がありません。';
+        if (analysisProgressStatus) analysisProgressStatus.textContent = '保存結果がありません。';
         return;
       }
       const patterns = saved.patterns;
@@ -407,11 +414,11 @@
       if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
       if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
       if (runAnalysisHint) runAnalysisHint.textContent = `前回のCloud全探索結果を読込済み（${patterns.length}件）`;
-      if (cloudPerfectStatus) {
-        cloudPerfectStatus.textContent = `💾 保存日時: ${dateStr} / 計算時間: ${saved.elapsedMs ? (saved.elapsedMs / 1000).toFixed(1) + '秒' : '不明'}`;
+      if (analysisProgressStatus) {
+        analysisProgressStatus.textContent = `💾 保存日時: ${dateStr} / 計算時間: ${saved.elapsedMs ? (saved.elapsedMs / 1000).toFixed(1) + '秒' : '不明'}`;
       }
     } catch (e) {
-      if (cloudPerfectStatus) cloudPerfectStatus.textContent = `読み込みエラー: ${e.message || e}`;
+      if (analysisProgressStatus) analysisProgressStatus.textContent = `読み込みエラー: ${e.message || e}`;
     }
   }
 
