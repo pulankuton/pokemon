@@ -201,8 +201,8 @@ async function runCloudPerfectJob(job, excludedIds) {
     maxUncovered: 0,
     statRequirements: [],
     requiredTypes: [],
-    maxAtkThreats: 3,
-    maxDefThreats: 3,
+    maxAtkThreats: 1,
+    maxDefThreats: 1,
     atkThreatsMode: 'lte',
     defThreatsMode: 'lte'
   };
@@ -394,7 +394,7 @@ app.post('/api/cloud-perfect', async (req, res) => {
       minBst: false, noOverlap: true, maxMega: 3,
       excludedIds, maxWeakness: 0, maxUncovered: 0,
       statRequirements: [], requiredTypes: [],
-      maxAtkThreats: 3, maxDefThreats: 3,
+      maxAtkThreats: 1, maxDefThreats: 1,
       atkThreatsMode: 'lte', defThreatsMode: 'lte'
     };
 
