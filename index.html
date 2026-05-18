@@ -112,6 +112,7 @@
       <div style="margin-top:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <button id="btn-run-analysis" class="mode-btn active" style="padding:10px 20px;">🔍 この条件で検索</button>
         <button id="btn-run-cloud-perfect-search" class="mode-btn" style="padding:10px 20px;">☁️ Cloud全探索（完璧条件）</button>
+        <button id="btn-load-saved-perfect" class="mode-btn" style="padding:10px 20px; display:none;">💾 前回結果を読込</button>
         <span id="analysis-run-hint" style="font-size:0.8rem; color:var(--text-muted);">ポケモンや条件を選んだあとに検索を実行してください</span>
         <span id="analysis-running-indicator" class="analysis-running-indicator" style="display:none;">
           <span class="analysis-spinner"></span>
@@ -308,6 +309,52 @@
                 <div id="team-threats-def" style="line-height:1.9;"></div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Cloud全探索フィルタUI -->
+    <section id="saved-perfect-filter-section" style="display:none;">
+      <div class="section-title">
+        <span class="step-badge">🔎</span>
+        <span>Cloud全探索結果のフィルタリング</span>
+      </div>
+      <div class="settings-panel" style="margin-bottom:16px;">
+        <div style="margin-bottom:12px;">
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:6px;">📋 全探索の固定条件（この条件で網羅済み）</div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <span style="font-size:0.75rem; padding:3px 10px; border-radius:12px; background:rgba(0,184,148,0.15); color:#00b894; border:1px solid rgba(0,184,148,0.3);">✅ タイプ被りなし</span>
+            <span style="font-size:0.75rem; padding:3px 10px; border-radius:12px; background:rgba(0,184,148,0.15); color:#00b894; border:1px solid rgba(0,184,148,0.3);">✅ メガ2枠まで</span>
+            <span style="font-size:0.75rem; padding:3px 10px; border-radius:12px; background:rgba(0,184,148,0.15); color:#00b894; border:1px solid rgba(0,184,148,0.3);">✅ 弱点ペナルティ 0</span>
+            <span style="font-size:0.75rem; padding:3px 10px; border-radius:12px; background:rgba(0,184,148,0.15); color:#00b894; border:1px solid rgba(0,184,148,0.3);">✅ 抜群未対応 0</span>
+            <span style="font-size:0.75rem; padding:3px 10px; border-radius:12px; background:rgba(108,92,231,0.15); color:#a29bfe; border:1px solid rgba(108,92,231,0.3);">🔎 攻撃脅威 ≤3（↓で絞込可）</span>
+            <span style="font-size:0.75rem; padding:3px 10px; border-radius:12px; background:rgba(108,92,231,0.15); color:#a29bfe; border:1px solid rgba(108,92,231,0.3);">🔎 防御脅威 ≤3（↓で絞込可）</span>
+          </div>
+          <div id="saved-filter-excluded-info" style="font-size:0.75rem; color:var(--text-muted); margin-top:6px;"></div>
+        </div>
+        <div style="padding-top:12px; border-top:1px solid var(--border-glass);">
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px;">⚡ 絞り込みフィルタ（変更すると即座に反映）</div>
+          <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
+            <label class="filter-label" style="color:var(--danger);">
+              <span style="font-weight:500;">⚔️ 攻撃面の重たい相手:</span>
+              <select id="saved-filter-atk-threats" class="filter-select">
+                <option value="0">0匹（完璧）</option>
+                <option value="1">1匹以下</option>
+                <option value="2">2匹以下</option>
+                <option value="3" selected>3匹以下（全件）</option>
+              </select>
+            </label>
+            <label class="filter-label" style="color:var(--accent-primary);">
+              <span style="font-weight:500;">🛡️ 防御面の重たい相手:</span>
+              <select id="saved-filter-def-threats" class="filter-select">
+                <option value="0">0匹（完璧）</option>
+                <option value="1">1匹以下</option>
+                <option value="2">2匹以下</option>
+                <option value="3" selected>3匹以下（全件）</option>
+              </select>
+            </label>
+            <span id="saved-filter-result-count" style="font-size:0.85rem; color:var(--text-secondary); font-weight:600;"></span>
           </div>
         </div>
       </div>

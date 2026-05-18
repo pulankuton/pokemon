@@ -45,6 +45,7 @@ app.get('/api/health', (req, res) => {
 // API: Settings (Excluded & Recent Pokemon)
 // =========================================
 const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+const CLOUD_PERFECT_RESULTS_FILE = path.join(__dirname, 'cloud-perfect-results.json');
 
 app.get('/api/settings', async (req, res) => {
   try {
@@ -193,15 +194,15 @@ app.post('/api/cloud-perfect/start', (req, res) => {
 async function runCloudPerfectJob(job, excludedIds) {
   const mergedOptions = {
     minBst: false,
-    noOverlap: false,
+    noOverlap: true,
     maxMega: 2,
     excludedIds,
     maxWeakness: 0,
     maxUncovered: 0,
     statRequirements: [],
     requiredTypes: [],
-    maxAtkThreats: 0,
-    maxDefThreats: 0,
+    maxAtkThreats: 3,
+    maxDefThreats: 3,
     atkThreatsMode: 'lte',
     defThreatsMode: 'lte'
   };
@@ -266,6 +267,28 @@ async function runCloudPerfectJob(job, excludedIds) {
   job.status = 'done';
   console.log(`[CloudPerfect] Job ${job.id} done: ${merged.length} patterns in ${elapsedMs}ms`);
 
+  // 結果をファイルに保存（次回起動時に再利用可能）
+  try {
+    const saveData = {
+      savedAt: new Date().toISOString(),
+      elapsedMs,
+      excludedIds,
+      conditions: {
+        noOverlap: mergedOptions.noOverlap,
+        maxMega: mergedOptions.maxMega,
+        maxWeakness: mergedOptions.maxWeakness,
+        maxUncovered: mergedOptions.maxUncovered,
+        maxAtkThreats: mergedOptions.maxAtkThreats,
+        maxDefThreats: mergedOptions.maxDefThreats
+      },
+      patterns: merged
+    };
+    await fs.writeFile(CLOUD_PERFECT_RESULTS_FILE, JSON.stringify(saveData), 'utf-8');
+    console.log(`[CloudPerfect] Results saved to ${CLOUD_PERFECT_RESULTS_FILE}`);
+  } catch (saveErr) {
+    console.error('[CloudPerfect] Failed to save results:', saveErr);
+  }
+
   // 24時間後にジョブを削除（後から復元できるように長めに保持）
   setTimeout(() => jobs.delete(job.id), 24 * 60 * 60 * 1000);
 }
@@ -329,6 +352,37 @@ app.post('/api/cloud-perfect/cancel/:id', (req, res) => {
 });
 
 // =========================================
+// API: Cloud Perfect — 保存結果の取得
+// =========================================
+app.get('/api/cloud-perfect/saved', async (req, res) => {
+  try {
+    const data = await fs.readFile(CLOUD_PERFECT_RESULTS_FILE, 'utf-8');
+    const parsed = JSON.parse(data);
+    res.json(parsed);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return res.json({ patterns: null });
+    }
+    res.status(500).json({ error: 'Failed to read saved results' });
+  }
+});
+
+// =========================================
+// API: Cloud Perfect — 保存結果の削除
+// =========================================
+app.delete('/api/cloud-perfect/saved', async (req, res) => {
+  try {
+    await fs.unlink(CLOUD_PERFECT_RESULTS_FILE);
+    res.json({ success: true });
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return res.json({ success: true });
+    }
+    res.status(500).json({ error: 'Failed to delete saved results' });
+  }
+});
+
+// =========================================
 // Legacy: POST /api/cloud-perfect（同期版フォールバック）
 // =========================================
 app.post('/api/cloud-perfect', async (req, res) => {
@@ -337,10 +391,10 @@ app.post('/api/cloud-perfect', async (req, res) => {
   try {
     const { excludedIds = [] } = req.body;
     const mergedOptions = {
-      minBst: false, noOverlap: false, maxMega: 2,
+      minBst: false, noOverlap: true, maxMega: 2,
       excludedIds, maxWeakness: 0, maxUncovered: 0,
       statRequirements: [], requiredTypes: [],
-      maxAtkThreats: 0, maxDefThreats: 0,
+      maxAtkThreats: 3, maxDefThreats: 3,
       atkThreatsMode: 'lte', defThreatsMode: 'lte'
     };
 

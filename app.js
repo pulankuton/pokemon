@@ -125,6 +125,12 @@
     }
     return res.json();
   }
+
+  async function remoteCloudPerfectSaved() {
+    const res = await fetch(apiUrl('cloud-perfect/saved'));
+    if (!res.ok) return { patterns: null };
+    return res.json();
+  }
   
   // Excluded List (Blacklist)
   let excludedPokemon = new Set();
@@ -172,6 +178,7 @@
   const runAnalysisIndicator = document.getElementById('analysis-running-indicator');
   const engineStatus = document.getElementById('engine-status');
   const cloudPerfectStatus = document.getElementById('cloud-perfect-status');
+  const loadSavedPerfectBtn = document.getElementById('btn-load-saved-perfect');
   let analysisRunning = false;
   let cloudPerfectPollTimer = null;
 
@@ -225,7 +232,7 @@
     setAnalysisRunning(true);
     if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索（完璧条件）を実行中...';
     if (cloudPerfectStatus) {
-      cloudPerfectStatus.textContent = `固定条件: タイプ被りあり / メガ2枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手0 / 防御重たい相手0 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
+      cloudPerfectStatus.textContent = `固定条件: タイプ被りなし / メガ2枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手3以下 / 防御重たい相手3以下 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
     }
     setEngineStatus(useRemoteRecommendApi() ? '実行エンジン: ☁️ Cloud（API）' : '実行エンジン: 🖥️ ローカル（ブラウザ）');
 
@@ -255,16 +262,14 @@
                   localStorage.removeItem('pokemon_builder_cloud_job');
                   const result = await remoteCloudPerfectResult(jobId);
                   patterns = result.patterns || [];
-                  analysisSection.style.display = 'none';
-                  recSection.style.display = '';
-                  renderPatterns(patterns, []);
+                  showSavedPerfectFilterUI(patterns);
                   if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
                   if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
                   if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
                   if (cloudPerfectStatus && patterns.length === 0) {
                     cloudPerfectStatus.textContent = '条件一致なし。';
                   } else if (cloudPerfectStatus) {
-                    cloudPerfectStatus.textContent = `条件一致パーティを表示中（全${patterns.length}件）`;
+                    cloudPerfectStatus.textContent = `全${patterns.length}件を取得済み — 下のフィルタで絞り込めます`;
                   }
                   setAnalysisRunning(false);
                 } else if (st.status === 'error') {
@@ -290,29 +295,27 @@
             // ローカル実行（進捗表示はなし）
             patterns = await recommendTeam([], allPokemon, currentMode, 6, {
               minBst: false,
-              noOverlap: false,
+              noOverlap: true,
               maxMega: 2,
               excludedIds: new Set(excludedPokemon),
               maxWeakness: 0,
               maxUncovered: 0,
               statRequirements: [],
               requiredTypes: [],
-              maxAtkThreats: 0,
-              maxDefThreats: 0,
+              maxAtkThreats: 3,
+              maxDefThreats: 3,
               searchPatternPoolLimit: SEARCH_PROFILE.patternPoolLimit
             });
           }
 
-          analysisSection.style.display = 'none';
-          recSection.style.display = '';
-          renderPatterns(patterns, []);
+          showSavedPerfectFilterUI(patterns);
           if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
           if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
           if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
           if (cloudPerfectStatus && patterns.length === 0) {
             cloudPerfectStatus.textContent = '条件一致なし。';
           } else if (cloudPerfectStatus) {
-            cloudPerfectStatus.textContent = `条件一致パーティを表示中（全${patterns.length}件）`;
+            cloudPerfectStatus.textContent = `全${patterns.length}件を取得済み — 下のフィルタで絞り込めます`;
           }
         } finally {
           if (releaseRunningInFinally) setAnalysisRunning(false);
@@ -343,16 +346,14 @@
           localStorage.removeItem('pokemon_builder_cloud_job');
           const result = await remoteCloudPerfectResult(jobId);
           let patterns = result.patterns || [];
-          analysisSection.style.display = 'none';
-          recSection.style.display = '';
-          renderPatterns(patterns, []);
+          showSavedPerfectFilterUI(patterns);
           if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
           if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
           if (runAnalysisHint) runAnalysisHint.textContent = `Cloud全探索 完了（条件一致: ${patterns.length}件）`;
           if (cloudPerfectStatus && patterns.length === 0) {
             cloudPerfectStatus.textContent = '条件一致なし。';
           } else if (cloudPerfectStatus) {
-            cloudPerfectStatus.textContent = `条件一致パーティを表示中（全${patterns.length}件）`;
+            cloudPerfectStatus.textContent = `全${patterns.length}件を取得済み — 下のフィルタで絞り込めます`;
           }
           setAnalysisRunning(false);
         } else if (st.status === 'error') {
@@ -370,6 +371,108 @@
         setAnalysisRunning(false);
       }
     }, 1000);
+  }
+
+  // ===== 保存結果のチェック・読み込み =====
+  async function checkSavedPerfectResults() {
+    try {
+      const saved = await remoteCloudPerfectSaved();
+      if (saved && saved.patterns && saved.patterns.length > 0) {
+        if (loadSavedPerfectBtn) {
+          const dt = saved.savedAt ? new Date(saved.savedAt) : null;
+          const dateStr = dt ? `${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2,'0')}` : '';
+          loadSavedPerfectBtn.textContent = `💾 前回結果を読込（${saved.patterns.length}件 ${dateStr}）`;
+          loadSavedPerfectBtn.style.display = '';
+        }
+      }
+    } catch (e) {
+      console.warn('[App] checkSavedPerfectResults failed:', e);
+    }
+  }
+
+  async function loadSavedPerfectResults() {
+    if (analysisRunning) return;
+    try {
+      if (cloudPerfectStatus) cloudPerfectStatus.textContent = '前回の保存結果を読み込み中...';
+      const saved = await remoteCloudPerfectSaved();
+      if (!saved || !saved.patterns || saved.patterns.length === 0) {
+        if (cloudPerfectStatus) cloudPerfectStatus.textContent = '保存結果がありません。';
+        return;
+      }
+      const patterns = saved.patterns;
+      const dt = saved.savedAt ? new Date(saved.savedAt) : null;
+      const dateStr = dt ? `${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2,'0')}` : '不明';
+
+      showSavedPerfectFilterUI(patterns);
+      if (runAnalysisBtn) runAnalysisBtn.classList.remove('active');
+      if (runCloudPerfectBtn) runCloudPerfectBtn.classList.remove('active');
+      if (runAnalysisHint) runAnalysisHint.textContent = `前回のCloud全探索結果を読込済み（${patterns.length}件）`;
+      if (cloudPerfectStatus) {
+        cloudPerfectStatus.textContent = `💾 保存日時: ${dateStr} / 計算時間: ${saved.elapsedMs ? (saved.elapsedMs / 1000).toFixed(1) + '秒' : '不明'}`;
+      }
+    } catch (e) {
+      if (cloudPerfectStatus) cloudPerfectStatus.textContent = `読み込みエラー: ${e.message || e}`;
+    }
+  }
+
+  // ===== 全探索結果フィルタUI =====
+  let savedPerfectPatterns = null; // 全結果を保持
+  let savedFilterListenersAttached = false;
+
+  function showSavedPerfectFilterUI(patterns) {
+    savedPerfectPatterns = patterns;
+
+    const filterSection = document.getElementById('saved-perfect-filter-section');
+    const atkSelect = document.getElementById('saved-filter-atk-threats');
+    const defSelect = document.getElementById('saved-filter-def-threats');
+    const excludedInfo = document.getElementById('saved-filter-excluded-info');
+
+    if (filterSection) filterSection.style.display = '';
+    analysisSection.style.display = 'none';
+
+    // 除外情報を表示
+    if (excludedInfo) {
+      excludedInfo.textContent = excludedPokemon.size > 0
+        ? `🚫 除外ポケモン: ${excludedPokemon.size}匹適用済み`
+        : '🚫 除外ポケモン: なし';
+    }
+
+    // フィルタのイベントリスナーは一度だけ登録
+    if (!savedFilterListenersAttached) {
+      savedFilterListenersAttached = true;
+      if (atkSelect) atkSelect.addEventListener('change', applySavedPerfectFilter);
+      if (defSelect) defSelect.addEventListener('change', applySavedPerfectFilter);
+    }
+
+    // フィルタをデフォルト（3=全件）にリセットして初回描画
+    if (atkSelect) atkSelect.value = '3';
+    if (defSelect) defSelect.value = '3';
+    applySavedPerfectFilter();
+  }
+
+  function applySavedPerfectFilter() {
+    if (!savedPerfectPatterns) return;
+
+    const atkSelect = document.getElementById('saved-filter-atk-threats');
+    const defSelect = document.getElementById('saved-filter-def-threats');
+    const countSpan = document.getElementById('saved-filter-result-count');
+
+    const maxAtk = atkSelect ? parseInt(atkSelect.value, 10) : 3;
+    const maxDef = defSelect ? parseInt(defSelect.value, 10) : 3;
+
+    const filtered = savedPerfectPatterns.filter(pat => {
+      const tc = pat.threatCount || {};
+      if (tc.attack > maxAtk) return false;
+      if (tc.defense > maxDef) return false;
+      return true;
+    });
+
+    if (countSpan) {
+      countSpan.textContent = `→ ${filtered.length} 件 / 全 ${savedPerfectPatterns.length} 件`;
+    }
+
+    recSection.style.display = '';
+    renderPatterns(filtered, []);
   }
 
   // ===== Initialize =====
@@ -436,12 +539,18 @@
       setupBestPairSection();
       if (runAnalysisBtn) runAnalysisBtn.addEventListener('click', runAnalysisNow);
       if (runCloudPerfectBtn) runCloudPerfectBtn.addEventListener('click', runCloudPerfectSearch);
+      if (loadSavedPerfectBtn) loadSavedPerfectBtn.addEventListener('click', loadSavedPerfectResults);
       renderExcludedList();
       markAnalysisDirty();
       
       const pendingCloudJob = localStorage.getItem('pokemon_builder_cloud_job');
       if (pendingCloudJob && useRemoteRecommendApi()) {
         resumeCloudPerfectPolling(pendingCloudJob);
+      }
+
+      // 保存結果が存在するかチェックし、ボタンを表示
+      if (useRemoteRecommendApi()) {
+        checkSavedPerfectResults();
       }
 
       console.log('[App] init complete');
