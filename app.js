@@ -432,6 +432,7 @@
     const filterSection = document.getElementById('saved-perfect-filter-section');
     const atkSelect = document.getElementById('saved-filter-atk-threats');
     const defSelect = document.getElementById('saved-filter-def-threats');
+    const pokemonInput = document.getElementById('saved-filter-pokemon');
     const excludedInfo = document.getElementById('saved-filter-excluded-info');
 
     if (filterSection) filterSection.style.display = '';
@@ -449,6 +450,7 @@
       savedFilterListenersAttached = true;
       if (atkSelect) atkSelect.addEventListener('change', applySavedPerfectFilter);
       if (defSelect) defSelect.addEventListener('change', applySavedPerfectFilter);
+      if (pokemonInput) pokemonInput.addEventListener('input', applySavedPerfectFilter);
     }
 
     // フィルタをデフォルト（3=全件）にリセットして初回描画
@@ -462,15 +464,29 @@
 
     const atkSelect = document.getElementById('saved-filter-atk-threats');
     const defSelect = document.getElementById('saved-filter-def-threats');
+    const pokemonInput = document.getElementById('saved-filter-pokemon');
     const countSpan = document.getElementById('saved-filter-result-count');
 
     const maxAtk = atkSelect ? parseInt(atkSelect.value, 10) : 3;
     const maxDef = defSelect ? parseInt(defSelect.value, 10) : 3;
+    
+    // 入力文字列を全角/半角スペースで分割して配列にする
+    const searchTerms = pokemonInput ? pokemonInput.value.trim().split(/[\s　]+/).filter(t => t.length > 0) : [];
 
     const filtered = savedPerfectPatterns.filter(pat => {
       const tc = pat.threatCount || {};
       if (tc.attack > maxAtk) return false;
       if (tc.defense > maxDef) return false;
+
+      // 指定されたポケモン名（複数）をすべて含んでいるかチェック (AND検索)
+      if (searchTerms.length > 0) {
+        for (const term of searchTerms) {
+          // チーム内に term を含むポケモンが1匹でもいるか
+          const hasPokemon = pat.team.some(p => p.jaName.includes(term));
+          if (!hasPokemon) return false; // 1つでも含まれていなければ除外
+        }
+      }
+
       return true;
     });
 
