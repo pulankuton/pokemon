@@ -483,15 +483,17 @@
 
       // 除外リストに登録されているポケモンを含むチームは非表示
       if (excludedPokemon && excludedPokemon.size > 0) {
-        const hasExcluded = pat.team.some(p => excludedPokemon.has(p.id));
+        const team = pat.members || pat.team || [];
+        const hasExcluded = team.some(p => excludedPokemon.has(p.id));
         if (hasExcluded) return false;
       }
 
       // 指定されたポケモン名（複数）をすべて含んでいるかチェック (AND検索)
       if (searchTerms.length > 0) {
+        const team = pat.members || pat.team || [];
         for (const term of searchTerms) {
           // チーム内に term を含むポケモンが1匹でもいるか
-          const hasPokemon = pat.team.some(p => p.jaName.includes(term));
+          const hasPokemon = team.some(p => p.jaName.includes(term));
           if (!hasPokemon) return false; // 1つでも含まれていなければ除外
         }
       }
