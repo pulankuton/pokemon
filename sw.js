@@ -1,7 +1,7 @@
 /* PWA: app shell caching (same-origin only) */
 'use strict';
 
-const CACHE_NAME = 'pokemon-champions-shell-v1';
+const CACHE_NAME = 'pokemon-champions-shell-v2';
 
 const PRECACHE_URLS = [
   './',
