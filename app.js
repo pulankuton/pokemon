@@ -233,7 +233,7 @@
     setAnalysisRunning(true);
     if (runAnalysisHint) runAnalysisHint.textContent = 'Cloud全探索（完璧条件）を実行中...';
     if (cloudPerfectStatus) {
-      cloudPerfectStatus.textContent = `固定条件: タイプ被りなし / メガ2枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手3以下 / 防御重たい相手3以下 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
+      cloudPerfectStatus.textContent = `固定条件: タイプ被りなし / メガ3枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手3以下 / 防御重たい相手3以下 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
     }
     if (analysisProgressStatus) {
       analysisProgressStatus.textContent = '';
@@ -300,7 +300,7 @@
             patterns = await recommendTeam([], allPokemon, currentMode, 6, {
               minBst: false,
               noOverlap: true,
-              maxMega: 2,
+              maxMega: 3,
               excludedIds: new Set(excludedPokemon),
               maxWeakness: 0,
               maxUncovered: 0,
@@ -398,7 +398,7 @@
     if (analysisRunning) return;
     try {
       if (cloudPerfectStatus) {
-        cloudPerfectStatus.textContent = `固定条件: タイプ被りなし / メガ2枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手3以下 / 防御重たい相手3以下 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
+        cloudPerfectStatus.textContent = `固定条件: タイプ被りなし / メガ3枠まで / 弱点0 / 抜群未対応0 / 攻撃重たい相手3以下 / 防御重たい相手3以下 / 除外適用${excludedPokemon.size > 0 ? `（${excludedPokemon.size}匹）` : 'なし'}`;
       }
       if (analysisProgressStatus) analysisProgressStatus.textContent = '前回の保存結果を読み込み中...';
       const saved = await remoteCloudPerfectSaved();
